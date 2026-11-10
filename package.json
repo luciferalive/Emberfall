@@ -1,0 +1,9 @@
+{
+  "name": "emberfall",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "check": "node --check js/data.js && node --check js/state.js && node --check js/app.js"
+  }
+}
