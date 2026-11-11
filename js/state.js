@@ -1,9 +1,10 @@
 import {
   VERSION, RESOURCES, RESOURCE_BY_ID, PROFESSIONS, PROFESSION_BY_ID, PERSONALITIES, BUILDINGS, BUILDING_BY_ID,
   REGIONS, ENEMIES, BOSSES, RELICS, BLESSINGS, HERO_CLASSES, PETS, MOUNTS,
-  RECIPES, RESEARCH, QUESTS, ACHIEVEMENTS, MERCHANT_ITEMS, SELL_VALUES, ACTIONS, NAMES, BASE_STORAGE
+  RECIPES, RESEARCH, QUESTS, ACHIEVEMENTS, MERCHANT_ITEMS, SELL_VALUES, ACTIONS, NAMES, BASE_STORAGE, CLASS_OF
 } from './data.js';
 import { FEATURES, conditionMet, allMet } from './unlocks.js';
+import { STORAGE_CLASSES } from './buildings.js';
 import {
   DAY_SECONDS, HOUR_SECONDS, START_CLOCK, dayNumber, hourOfDay, isDaytime, seasonIndex, seasonName,
   formatClock, isWorking, SCHEDULES, SEASONS, activityAt
@@ -17,7 +18,11 @@ const STEP_SECONDS = HOUR_SECONDS / 2; // simulation never crosses a half-hour b
 const FOOD_PER_VILLAGER_DAY = 2;
 const HUNGER_LEAVE_AFTER = 900;   // seconds of continuous starvation before anyone may leave
 const HUNGER_LEAVE_EVERY = 450;
-const UNCAPPED = new Set(['prestige']);
+// Jobs the auto-hire system may fill, in priority order, with how much of the workforce each deserves.
+const AUTO_JOBS = [['farmer', 2], ['woodcutter', 2], ['miner', 1.5], ['stoneMason', 1], ['hunter', 1], ['fisherman', 1], ['researcher', 1.5], ['lumberjack', 1.5], ['blacksmith', 1], ['herbalist', 1], ['alchemist', .8], ['furHunter', .8], ['merchant', .6], ['trader', .6], ['guard', .6], ['cook', .5], ['builder', .5]];
+const FOOD_JOBS = new Set(['farmer', 'fisherman', 'hunter']);
+const FAMILY_CHECK_SECONDS = 300;   // every 5 real minutes the settlement may grow a family
+const CHILD_GROWTH_SECONDS = DAY_SECONDS; // a child becomes a villager after one in-game day
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const rint = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
@@ -76,7 +81,9 @@ export function createNewState() {
     market: [],
     families: [],
     prestigeCount: 0,
-    actionCooldowns: {}
+    actionCooldowns: {},
+    autoHire: true,
+    nextFamily: START_CLOCK + FAMILY_CHECK_SECONDS
   };
 }
 
@@ -102,7 +109,7 @@ function migrateV1(old, now, fresh) {
   let uid = 1;
   if (old.buildings && !Array.isArray(old.buildings)) {
     for (const [id, level] of Object.entries(old.buildings)) {
-      if (BUILDING_BY_ID[id] && level > 0) list.push({ uid: `b${uid++}`, id, level: clamp(Math.floor(level), 1, 10) });
+      if ((BUILDING_BY_ID[id] || id === 'storage') && level > 0) list.push({ uid: `b${uid++}`, id, level: clamp(Math.floor(level), 1, 10) });
     }
   }
   out.buildings = list;
@@ -139,6 +146,16 @@ export function normaliseState(value) {
   const now = Date.now();
   let src = value;
   if ((Number(value.version) || 1) < 2) src = migrateV1(value, now, fresh);
+  // Version 3 replaced the single generic Storage with specialised stores. Keep what players had:
+  // every old Storage becomes a Lumber Yard, Stoneyard and Granary of the same level.
+  if (Array.isArray(src.buildings) && src.buildings.some(b => b && b.id === 'storage')) {
+    const converted = [];
+    for (const b of src.buildings) {
+      if (b && b.id === 'storage') for (const id of ['lumberYard', 'stoneyard', 'granary']) converted.push({ uid: `${b.uid || 'b'}-${id}`, id, level: b.level });
+      else converted.push(b);
+    }
+    src = { ...src, buildings: converted };
+  }
   const merged = { ...fresh, ...src, version: VERSION };
   merged.resources = { ...fresh.resources };
   for (const [id, amount] of Object.entries(src.resources || {})) if (RESOURCE_BY_ID[id]) merged.resources[id] = clamp(num(Number(amount)), 0, 1e12);
@@ -156,12 +173,17 @@ export function normaliseState(value) {
     productivity: num(v.productivity) || 1, happiness: num(v.happiness) || 70, experience: num(v.experience), skill: v.skill || 1, family: v.family || null, away: v.away || null
   }));
   merged.tracking.peakVillagers = Math.max(merged.tracking.peakVillagers || 0, merged.villagers.length);
+  merged.autoHire = src.autoHire !== false;
+  merged.families = (Array.isArray(src.families) ? src.families : []).filter(f => f && Array.isArray(f.members)).map(f => ({
+    id: f.id || `f-${merged.nextUid++}`, members: f.members,
+    kids: Array.isArray(f.kids) ? f.kids.filter(Number.isFinite) : Array.from({ length: Math.max(0, Math.min(3, Number(f.children) || 0)) }, () => merged.clock)
+  }));
   merged.logs = Array.isArray(src.logs) ? src.logs.slice(0, 50) : fresh.logs;
   merged.market = Array.isArray(src.market) ? src.market : [];
-  for (const key of ['heroes', 'relics', 'pets', 'mounts', 'monsters', 'equipment', 'expeditions', 'families', 'claimedAchievements']) if (!Array.isArray(merged[key])) merged[key] = [];
+  for (const key of ['heroes', 'relics', 'pets', 'mounts', 'monsters', 'equipment', 'expeditions', 'claimedAchievements']) if (!Array.isArray(merged[key])) merged[key] = [];
   for (const key of ['quests', 'blessings', 'petLevels', 'actionCooldowns', 'unlocks', 'flags', 'overflow', 'hungerFlags', 'fullWarned']) if (!merged[key] || typeof merged[key] !== 'object') merged[key] = {};
   if (!Number.isFinite(merged.clock)) merged.clock = START_CLOCK;
-  for (const key of ['nextRecruitment', 'nextEvent', 'nextWeather', 'merchantRefresh']) if (!Number.isFinite(merged[key]) || merged[key] > merged.clock + 3600) merged[key] = fresh[key] - START_CLOCK + merged.clock;
+  for (const key of ['nextRecruitment', 'nextEvent', 'nextWeather', 'merchantRefresh', 'nextFamily']) if (!Number.isFinite(merged[key]) || merged[key] > merged.clock + 3600) merged[key] = fresh[key] - START_CLOCK + merged.clock;
   merged.hunger = Math.max(0, num(merged.hunger));
   merged.seasonSeen = seasonIndex(merged.clock);
   merged.lastTick = now;
@@ -243,17 +265,27 @@ export class Game {
   buildingAvailable(def) { return !!this.state.unlocks[`b_${def.id}`] || this.hasBuilding(def.id); }
   // Totals of every building effect, plus housing and storage capacity.
   fx() {
-    const t = { housing: 0, storage: BASE_STORAGE };
+    const t = { housing: 0, store: {}, storeAll: 0 };
     for (const inst of this.state.buildings) {
       const def = BUILDING_BY_ID[inst.id];
       if (!def) continue;
-      if (def.capTable) t[def.capKey] = (t[def.capKey] || 0) + def.capTable[clamp(inst.level, 1, def.capTable.length) - 1];
+      if (def.capTable) {
+        const amount = def.capTable[clamp(inst.level, 1, def.capTable.length) - 1];
+        if (def.capKey === 'storage') { if (def.capClass === 'all') t.storeAll += amount; else t.store[def.capClass] = (t.store[def.capClass] || 0) + amount; }
+        else t[def.capKey] = (t[def.capKey] || 0) + amount;
+      }
       for (const [key, value] of Object.entries(def.effect)) t[key] = (t[key] || 0) + value * inst.level;
     }
     return t;
   }
   housing() { return this.fx().housing; }
-  storageCap() { return this.fx().storage; }
+  // Storage limit for one resource. Specialised stores only raise their own goods; gold,
+  // silver, gems and other special items live outside storage and have no limit at all.
+  capOf(id, fx = this.fx()) {
+    const cls = CLASS_OF[id];
+    return cls ? BASE_STORAGE + (fx.store[cls] || 0) + fx.storeAll : Infinity;
+  }
+  storeName(id) { const cls = CLASS_OF[id]; return cls ? STORAGE_CLASSES[cls].name : null; }
   usedHousing() { return this.state.villagers.length; }
   freeHousing() { return Math.max(0, this.housing() - this.usedHousing()); }
   capacityOf(inst) {
@@ -270,7 +302,7 @@ export class Game {
   }
   buildCost(def) { return this.scaleCost(def.cost, Math.pow(1.25, this.countBuilt(def.id))); }
   upgradeCost(inst) { return this.scaleCost(BUILDING_BY_ID[inst.id].cost, Math.pow(1.55, inst.level)); }
-  costExceedsStorage(cost) { const cap = this.storageCap(); return Object.entries(cost).some(([id, amt]) => !UNCAPPED.has(id) && amt > cap); }
+  costExceedsStorage(cost) { const fx = this.fx(); return Object.entries(cost).some(([id, amt]) => amt > this.capOf(id, fx)); }
   describeCost(cost) {
     const entries = Object.entries(cost);
     return entries.length ? entries.map(([id, n]) => `${n} ${RESOURCE_BY_ID[id]?.name || id}`).join(', ') : 'No materials';
@@ -314,14 +346,14 @@ export class Game {
   // The only way resources enter the stockpile. Gains are limited by storage and the
   // refused amount is tallied in state.overflow so it is never silently discarded.
   addResources(rewards, reason = '', { passive = false } = {}) {
-    const cap = this.storageCap();
+    const fx = this.fx();
     const gained = [];
     const lost = [];
     for (const [id, amount] of Object.entries(rewards)) {
       if (!RESOURCE_BY_ID[id] || !Number.isFinite(amount) || !amount) continue;
       const before = this.resource(id);
       if (amount < 0) { this.state.resources[id] = number(Math.max(0, before + amount)); continue; }
-      const limit = UNCAPPED.has(id) ? Infinity : cap;
+      const limit = this.capOf(id, fx);
       const accepted = Math.min(amount, Math.max(0, limit - before));
       const overflow = amount - accepted;
       if (accepted > 0) {
@@ -472,7 +504,7 @@ export class Game {
     const out = {};
     for (const r of RESOURCES) {
       const stock = this.resource(r.id);
-      const cap = UNCAPPED.has(r.id) ? Infinity : fx.storage;
+      const cap = this.capOf(r.id, fx);
       const p = prod[r.id] || 0;
       const c = cons[r.id] || 0;
       const net = p - c;
@@ -489,6 +521,9 @@ export class Game {
     return {
       fx, ledger: this.ledger(fx), happiness: happy.value, happinessParts: happy.parts,
       recruitChance: this.recruitChance(happy.value), housing: fx.housing || 0, pop: this.state.villagers.length,
+      employed: this.state.villagers.filter(v => v.profession !== 'idle' && !v.away).length,
+      unemployed: this.state.villagers.filter(v => v.profession === 'idle' && !v.away).length,
+      away: this.state.villagers.filter(v => v.away).length, children: this.childCount(),
       guard: guards + (fx.guard || 0), combat: (fx.combat || 0) + guards * 2 + this.state.research.military * 2,
       travel: (fx.travel || 0) + this.petBonus('travel') * 100,
       foodUse: this.state.villagers.length * FOOD_PER_VILLAGER_DAY
@@ -552,19 +587,20 @@ export class Game {
     const leaver = candidates[0];
     if (!leaver) return;
     s.villagers = s.villagers.filter(v => v.id !== leaver.id);
-    s.families = s.families.map(f => ({ ...f, members: f.members.filter(m => m !== leaver.id) })).filter(f => f.members.length || f.children);
+    s.families = s.families.map(f => ({ ...f, members: f.members.filter(m => m !== leaver.id) })).filter(f => f.members.length > 0);
     s.villagers.forEach(v => { if (v.family === leaver.id) v.family = null; });
     if (this.counters) this.counters.left++;
     this.log(`${leaver.name} leaves the settlement, hungry and tired. Feed those who remain.`);
   }
   updateFullWarnings(offline) {
     if (offline) return;
-    const cap = this.storageCap();
+    const fx = this.fx();
     for (const r of RESOURCES) {
-      if (UNCAPPED.has(r.id)) continue;
+      const cap = this.capOf(r.id, fx);
+      if (!Number.isFinite(cap)) continue;
       const stock = this.resource(r.id);
       if (stock >= cap - .01 && (this.state.lifetime[r.id] || 0) > 0) {
-        if (!this.state.fullWarned[r.id]) { this.state.fullWarned[r.id] = true; this.log(`${r.name} storage is full. Production is overflowing.`); }
+        if (!this.state.fullWarned[r.id]) { this.state.fullWarned[r.id] = true; this.log(`${this.storeName(r.id)} is full: ${r.name} is overflowing.`); }
       } else if (stock < cap * .9) delete this.state.fullWarned[r.id];
     }
     const food = this.resource('food');
@@ -579,9 +615,11 @@ export class Game {
     const season = seasonIndex(s.clock);
     if (season !== s.seasonSeen) {
       s.seasonSeen = season;
-      this.growChildren(false);
       this.log(`The season turns to ${SEASONS[season]}.`);
     }
+    while (s.clock >= s.nextFamily) { s.nextFamily += FAMILY_CHECK_SECONDS; this.familyTick(); }
+    this.growKids();
+    this.autoAssign();
     while (s.clock >= s.nextRecruitment) {
       s.nextRecruitment += 60;
       if (offline) this.recruitOffline(); else this.tryRecruit();
@@ -699,6 +737,7 @@ export class Game {
     }
     for (const v of s.villagers) while (v.experience >= v.skill * 20 && v.skill < 20) v.skill++;
     s.tracking.peakVillagers = Math.max(s.tracking.peakVillagers || 0, s.villagers.length);
+    this.autoAssign();
     this.silent = wasSilent;
   }
   visibleTabs(tabs) { return tabs.filter(t => this.unlocked(t.feature)); }
@@ -723,12 +762,12 @@ export class Game {
   }
 
   // --- villagers ---------------------------------------------------------------------------
-  addVillager({ name, personality } = {}) {
+  addVillager({ name, personality, age, born } = {}) {
     const p = { ...(personality || pick(PERSONALITIES)) };
-    const v = { id: `v-${this.state.nextUid++}`, name: name || pick(NAMES), age: rint(18, 52), profession: 'idle', schedule: 'day', personality: p, productivity: number(.9 + Math.random() * .25), happiness: 70, experience: 0, skill: 1, family: null, away: null };
+    const v = { id: `v-${this.state.nextUid++}`, name: name || pick(NAMES), age: age || rint(18, 52), profession: 'idle', schedule: 'day', personality: p, productivity: number(.9 + Math.random() * .25), happiness: 70, experience: 0, skill: 1, family: null, away: null };
     this.state.villagers.push(v);
     this.state.tracking.peakVillagers = Math.max(this.state.tracking.peakVillagers || 0, this.state.villagers.length);
-    this.log(`${v.name}, a ${p.name.toLowerCase()} traveller, joins the fire.`);
+    if (!born) this.log(`${v.name}, a ${p.name.toLowerCase()} traveller, joins the fire.`);
     return v;
   }
   tryRecruit() {
@@ -1055,32 +1094,79 @@ export class Game {
     this.touch(true);
   }
 
-  // --- families ----------------------------------------------------------------------------
-  joinFamily() {
-    const unpaired = this.state.villagers.filter(v => !v.family);
-    if (unpaired.length < 2) return this.notify('Two unpaired villagers need time to become friends.');
-    const [one, two] = unpaired;
-    one.family = two.id;
-    two.family = one.id;
-    this.state.families.push({ id: `f-${this.state.nextUid++}`, members: [one.id, two.id], children: 0 });
-    this.state.morale += 5;
-    this.log(`${one.name} and ${two.name} have formed a family.`);
-    this.touch(true);
+  // --- families (automatic) ----------------------------------------------------------------
+  // Villagers pair up and have children by themselves when the settlement is doing well:
+  // happy, fed, and with a free bed for the new arrival. Natural recruitment is unaffected.
+  familyTick() {
+    const s = this.state;
+    if (!this.unlocked('villagerMgmt') || s.villagers.length < 2 || s.hunger > 0) return;
+    const happiness = this.happinessInfo().value;
+    if (happiness < 60) return;
+    if (this.resource('food') < s.villagers.length * FOOD_PER_VILLAGER_DAY * 1.5) return;
+    const waiting = s.families.reduce((t, f) => t + f.kids.length, 0);
+    if (this.housing() - s.villagers.length - waiting <= 0) return;
+    const single = s.villagers.filter(v => !v.family && !v.away);
+    if (single.length >= 2 && Math.random() < .6) {
+      const [one, two] = single;
+      one.family = two.id;
+      two.family = one.id;
+      s.families.push({ id: `f-${s.nextUid++}`, members: [one.id, two.id], kids: [] });
+      s.morale += 3;
+      this.log(`${one.name} and ${two.name} have grown close and started a family.`);
+      return;
+    }
+    const open = s.families.filter(f => f.kids.length < 3);
+    if (open.length && Math.random() < Math.min(.9, .15 + (happiness - 50) / 100)) {
+      const family = pick(open);
+      const names = family.members.map(id => s.villagers.find(v => v.id === id)?.name).filter(Boolean);
+      family.kids.push(s.clock);
+      s.morale += 1;
+      this.log(`A child is born${names.length ? ` to ${names.join(' and ')}` : ''}. They will join the workforce in a day.`);
+    }
   }
-  welcomeChild(familyId) {
-    const family = this.state.families.find(f => f.id === familyId);
-    if (!family) return;
-    if (!this.spend({ food: 15 })) return this.notify('The family needs 15 food to prepare.');
-    family.children++;
-    this.state.morale += 2;
-    this.log('A child is born into the settlement. They will grow into a villager after the next season.');
-    this.touch(true);
+  growKids() {
+    const s = this.state;
+    for (const family of s.families) {
+      while (family.kids.length && family.kids[0] + CHILD_GROWTH_SECONDS <= s.clock && this.freeHousing() > 0) {
+        family.kids.shift();
+        const v = this.addVillager({ age: rint(16, 18), born: true });
+        this.log(`${v.name} has grown up and joins the workforce.`);
+      }
+    }
   }
-  growChildren(announce = true) {
-    let grown = 0;
-    this.state.families.forEach(f => { while (f.children > 0 && this.usedHousing() < this.housing()) { f.children--; this.addVillager(); grown++; } });
-    if (grown) this.log(`${grown} child${grown > 1 ? 'ren have' : ' has'} grown into adulthood.`);
-    if (announce) this.touch(true);
+  childCount() { return this.state.families.reduce((t, f) => t + f.kids.length, 0); }
+
+  // --- jobs (automatic) --------------------------------------------------------------------
+  // Idle villagers take open job seats on their own, spreading across the available work and
+  // heading for food first when the stores run low. The player may still change anyone's job.
+  autoAssign() {
+    const s = this.state;
+    if (!s.autoHire || !this.unlocked('villagerMgmt')) return;
+    const idle = s.villagers.filter(v => v.profession === 'idle' && !v.away);
+    if (!idle.length) return;
+    const hungry = this.resource('food') < s.villagers.length * FOOD_PER_VILLAGER_DAY * 1.5;
+    for (const villager of idle) {
+      let best = null;
+      let bestScore = Infinity;
+      AUTO_JOBS.forEach(([id, weight], index) => {
+        const job = PROFESSION_BY_ID[id];
+        if (!job) return;
+        const seats = Number.isFinite(this.jobSlots(job)) ? this.jobSlots(job) : 2;
+        const filled = s.villagers.filter(v => v.profession === id).length;
+        if (seats <= 0 || filled >= seats) return;
+        const score = filled / weight + index * .01 - (hungry && FOOD_JOBS.has(id) ? 100 : 0);
+        if (score < bestScore) { bestScore = score; best = job; }
+      });
+      if (!best) break;
+      villager.profession = best.id;
+      if (!this.availableSchedules(villager).includes(villager.schedule)) villager.schedule = 'day';
+      this.log(`${villager.name} takes up work as a ${best.name.toLowerCase()}.`);
+    }
+  }
+  setAutoHire(on) {
+    this.state.autoHire = !!on;
+    this.log(on ? 'Idle villagers will now find work on their own.' : 'Auto-hire is off. Assign villagers yourself.');
+    this.touch(true);
   }
 
   // --- trade -------------------------------------------------------------------------------

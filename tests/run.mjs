@@ -108,24 +108,44 @@ test('upgrades follow housing table 2/4/6/8/12', () => {
   for (let i = 0; i < 4; i++) { give(g, { wood: 1e5, stone: 1e5 }); g.upgradeBuilding(uid); seen.push(g.capacityOf(g.state.buildings[0])); }
   assert.deepEqual(seen, [2, 4, 6, 8, 12]);
 });
-test('storage building = 500 per resource, levels 500/1000/2000/4000/8000', () => {
+test('lumber yard adds 500 to wood only; other goods keep their own limits', () => {
   const g = fresh();
-  assert.equal(g.storageCap(), 150);
+  assert.equal(g.capOf('wood'), 150);
   give(g, { wood: 100 });
-  g.state.unlocks.b_storage = true;
-  g.build('storage');
-  assert.equal(g.storageCap(), 150 + 500);
-  const uid = g.state.buildings[0].uid;
-  const caps = [];
-  for (let i = 0; i < 4; i++) { g.state.resources.wood = 140; g.state.resources.stone = 0; g.upgradeBuilding(uid); caps.push(g.state.buildings[0].level); }
-  assert.deepEqual(STORAGE_TABLE.slice(0, 5), [500, 1000, 2000, 4000, 8000]);
+  g.state.unlocks.b_lumberYard = true;
+  g.build('lumberYard');
+  assert.equal(g.capOf('wood'), 150 + 500);
+  assert.equal(g.capOf('stone'), 150);
+  assert.equal(g.capOf('coal'), 150);
 });
-test('multiple storage buildings stack', () => {
+test('gold, silver, gems and other special items are not stored: no limit', () => {
+  const g = fresh();
+  for (const id of ['gold', 'silver', 'gems', 'crystal', 'ancientCoins', 'torch', 'research', 'dragonScales']) assert.equal(g.capOf(id), Infinity, id);
+  g.addResources({ gold: 1e6, gems: 5000 });
+  assert.equal(g.resource('gold'), 1e6);
+  assert.equal(g.state.overflow.gold || 0, 0);
+});
+test('each store class serves its own goods (granary: food/meat/seeds/herbs/water, ore depot: iron/steel)', () => {
+  const g = fresh();
+  g.state.buildings.push({ uid: 'g1', id: 'granary', level: 1 }, { uid: 'o1', id: 'oreDepot', level: 2 }, { uid: 'c1', id: 'coalStore', level: 1 });
+  for (const id of ['food', 'meat', 'seeds', 'herbs', 'water']) assert.equal(g.capOf(id), 650, id);
+  for (const id of ['iron', 'steel']) assert.equal(g.capOf(id), 1150, id);
+  assert.equal(g.capOf('coal'), 650);
+  assert.equal(g.capOf('wood'), 150);
+});
+test('warehouse adds room to every store class', () => {
+  const g = fresh();
+  g.state.buildings.push({ uid: 'w1', id: 'warehouse', level: 1 });
+  assert.equal(g.capOf('wood'), 150 + 800);
+  assert.equal(g.capOf('coal'), 150 + 800);
+  assert.equal(g.capOf('gold'), Infinity);
+});
+test('multiple stores of one class stack', () => {
   const g = fresh();
   give(g, { wood: 1000 });
-  g.state.unlocks.b_storage = true;
-  g.build('storage'); g.build('storage');
-  assert.equal(g.storageCap(), 150 + 1000);
+  g.state.unlocks.b_lumberYard = true;
+  g.build('lumberYard'); g.build('lumberYard');
+  assert.equal(g.capOf('wood'), 150 + 1000);
 });
 test('storage cap is respected and overflow is counted, not discarded silently', () => {
   const g = fresh();
@@ -139,11 +159,12 @@ test('ledger reports accepted 0 and overflow when full', () => {
   give(g, { wood: 100, food: 100 });
   g.state.unlocks.b_smallHouse = true; g.state.unlocks.b_woodcutterHut = true;
   g.state.buildings.push({ uid: 'b1', id: 'woodcutterHut', level: 1 });
-  g.state.resources.wood = g.storageCap();
+  g.state.resources.wood = g.capOf('wood');
   const l = g.ledger().wood;
   assert.ok(l.prod > 0);
   assert.equal(l.accepted, 0);
   assert.ok(Math.abs(l.overflow - l.net) < 1e-6);
+  assert.equal(l.cap, 150);
   assert.ok(l.full);
 });
 test('villagers consume 2 food per day and food net shows negative', () => {
@@ -155,7 +176,7 @@ test('villagers consume 2 food per day and food net shows negative', () => {
 });
 test('food consumed over one full day equals 2 per villager', () => {
   const g = fresh();
-  g.state.buildings.push({ uid: 'b1', id: 'storage', level: 1 });
+  g.state.buildings.push({ uid: 'b1', id: 'lumberYard', level: 1 });
   g.addVillager(); g.addVillager();
   g.state.resources.food = 100;
   g.advance(DAY_SECONDS);
@@ -198,7 +219,7 @@ test('clock advances with game time', () => {
 });
 test('production respects working hours', () => {
   const g = fresh();
-  g.state.buildings.push({ uid: 'b1', id: 'woodcutterHut', level: 1 }, { uid: 'b2', id: 'storage', level: 3 });
+  g.state.buildings.push({ uid: 'b1', id: 'woodcutterHut', level: 1 }, { uid: 'b2', id: 'lumberYard', level: 3 });
   g.state.unlocks.professions = true;
   const v = g.addVillager(); g.addVillager(); g.addVillager();
   g.assignVillager(v.id, 'woodcutter');
@@ -218,9 +239,10 @@ test('guards may work the night shift; others cannot', () => {
   g.assignVillager(v.id, 'guard');
   assert.ok(g.availableSchedules(v).includes('night'));
 });
-test('profession assignment is manual and needs a free seat', () => {
+test('manual assignment (auto-hire off) needs a free seat', () => {
   const g = fresh();
   g.state.unlocks.professions = true;
+  g.state.autoHire = false;
   const v = g.addVillager();
   assert.equal(v.profession, 'idle');
   g.assignVillager(v.id, 'farmer');
@@ -310,7 +332,7 @@ test('findRelic refuses until ancient ruins are unlocked', () => {
 test('at least 40 buildings exist with cost, description, requirements; 10 levels', () => {
   assert.ok(BUILDINGS.length >= 40, `${BUILDINGS.length} buildings`);
   for (const b of BUILDINGS) { assert.ok(Object.keys(b.cost).length, b.id); assert.ok(b.description); assert.ok(Array.isArray(b.requires)); }
-  const costs = { smallHouse: { wood: 50, stone: 20 }, storage: { wood: 40 }, woodcutterHut: { wood: 60, stone: 20 }, farm: { wood: 50, stone: 30 }, quarry: { wood: 80, stone: 40 }, hunterLodge: { wood: 70, stone: 30 }, well: { stone: 50 }, workshop: { wood: 100, stone: 50 }, tavern: { wood: 120, stone: 60 }, blacksmith: { wood: 100, stone: 100, iron: 30 }, barracks: { wood: 150, stone: 100 }, library: { wood: 150, stone: 100 }, stable: { wood: 200, stone: 100 }, mageTower: { stone: 200, crystal: 50 }, castle: { wood: 500, stone: 500, iron: 100 }, campfire: { wood: 50 } };
+  const costs = { smallHouse: { wood: 50, stone: 20 }, lumberYard: { wood: 40 }, woodcutterHut: { wood: 60, stone: 20 }, farm: { wood: 50, stone: 30 }, quarry: { wood: 80, stone: 40 }, hunterLodge: { wood: 70, stone: 30 }, well: { stone: 50 }, workshop: { wood: 100, stone: 50 }, tavern: { wood: 120, stone: 60 }, blacksmith: { wood: 100, stone: 100, iron: 30 }, barracks: { wood: 150, stone: 100 }, library: { wood: 150, stone: 100 }, stable: { wood: 200, stone: 100 }, mageTower: { stone: 200, crystal: 50 }, castle: { wood: 500, stone: 500, iron: 100 }, campfire: { wood: 50 } };
   for (const [id, c] of Object.entries(costs)) assert.deepEqual(BUILDING_BY_ID[id].cost, c, id);
 });
 test('a building whose cost exceeds storage is flagged', () => {
@@ -320,7 +342,7 @@ test('a building whose cost exceeds storage is flagged', () => {
 });
 test('offline: respects 8h cap, storage, housing, and never goes negative', () => {
   const g = fresh();
-  g.state.buildings.push({ uid: 'b1', id: 'smallHouse', level: 1 }, { uid: 'b2', id: 'storage', level: 1 }, { uid: 'b3', id: 'woodcutterHut', level: 1 }, { uid: 'b4', id: 'farm', level: 1 });
+  g.state.buildings.push({ uid: 'b1', id: 'smallHouse', level: 1 }, { uid: 'b2', id: 'lumberYard', level: 1 }, { uid: 'b3', id: 'woodcutterHut', level: 1 }, { uid: 'b4', id: 'farm', level: 1 });
   g.state.unlocks.villagerMgmt = true; g.state.unlocks.professions = true; g.state.flags.traveller = true;
   g.addVillager(); g.addVillager();
   g.state.villagers.forEach((v, i) => { v.profession = i ? 'farmer' : 'woodcutter'; });
@@ -328,8 +350,7 @@ test('offline: respects 8h cap, storage, housing, and never goes negative', () =
   const report = g.runOffline(30 * 3600);
   assert.equal(report.capped, true);
   assert.equal(report.minutes, 480);
-  const cap = g.storageCap();
-  for (const [id, v] of Object.entries(g.state.resources)) { assert.ok(v >= 0, id); assert.ok(v <= cap + .01, `${id} ${v} > ${cap}`); }
+  for (const [id, v] of Object.entries(g.state.resources)) { assert.ok(v >= 0, id); assert.ok(v <= g.capOf(id) + .01, `${id} ${v} > ${g.capOf(id)}`); }
   assert.ok(g.state.villagers.length <= g.housing());
   assert.ok(report.wasted.wood > 0 || report.wasted.food > 0, 'overflow reported');
 });
@@ -340,7 +361,7 @@ test('offline: no resources from nowhere without producers', () => {
 });
 test('offline: recruitment capped by housing', () => {
   const g = fresh();
-  g.state.buildings.push({ uid: 'b1', id: 'smallHouse', level: 1 }, { uid: 'b2', id: 'storage', level: 1 });
+  g.state.buildings.push({ uid: 'b1', id: 'smallHouse', level: 1 }, { uid: 'b2', id: 'lumberYard', level: 1 });
   g.state.unlocks.villagerMgmt = true;
   g.state.resources.food = 500;
   const orig = Math.random; Math.random = () => 0;
@@ -350,13 +371,13 @@ test('offline: recruitment capped by housing', () => {
 test('save and load preserve progression', () => {
   const g = fresh();
   give(g, { wood: 100 });
-  g.state.unlocks.b_storage = true;
-  g.build('storage');
+  g.state.unlocks.b_lumberYard = true;
+  g.build('lumberYard');
   g.addVillager();
   g.state.clock += 500;
   g.save();
   const h = new Game();
-  assert.equal(h.countBuilt('storage'), 1);
+  assert.equal(h.countBuilt('lumberYard'), 1);
   assert.equal(h.state.villagers.length, 1);
   assert.ok(h.state.clock >= g.state.clock);
 });
@@ -364,11 +385,13 @@ test('v1 save migrates: keeps buildings and villagers, grants nothing extra, no 
   const old = { version: 1, lastSaved: Date.now() - 1000, resources: { wood: 120, stone: 40, food: 80, gold: 100 }, buildings: { campfire: 2, smallHouse: 3, storage: 1 }, villagers: [{ id: 'v1', name: 'Alden', profession: 'farmer', personality: { name: 'Hardworking', bonus: 'production', value: .15 }, productivity: 1, happiness: 70, experience: 0, skill: 1 }], heroes: [], relics: [], pets: [], expeditions: [], logs: [] };
   store.set(SAVE_KEY, JSON.stringify(old));
   const g = new Game();
-  assert.equal(g.state.version, 2);
+  assert.equal(g.state.version, 3);
   assert.equal(g.countBuilt('smallHouse'), 1);
   assert.equal(g.buildingLevel('smallHouse'), 3);
   assert.equal(g.state.villagers.length, 1);
-  assert.equal(g.resource('wood') <= g.storageCap(), true);
+  assert.equal(g.resource('wood') <= g.capOf('wood'), true);
+  assert.equal(g.countBuilt('stoneyard'), 1);
+  assert.equal(g.countBuilt('granary'), 1);
   assert.ok(g.unlocked('villagerMgmt') && g.unlocked('camp'));
   assert.ok(store.has('emberfall-save-v1-original'), 'original kept');
   const brand = new Game({ autoLoad: false });
@@ -377,11 +400,11 @@ test('v1 save migrates: keeps buildings and villagers, grants nothing extra, no 
 test('corrupt save falls back to backup, then to a clean new game', () => {
   const g = fresh();
   give(g, { wood: 100 });
-  g.state.unlocks.b_storage = true; g.build('storage');
+  g.state.unlocks.b_lumberYard = true; g.build('lumberYard');
   g.save(); g.save();
   store.set(SAVE_KEY, '{not json');
   const h = new Game();
-  assert.equal(h.countBuilt('storage'), 1);
+  assert.equal(h.countBuilt('lumberYard'), 1);
   store.set(SAVE_KEY, '{not json'); store.set('emberfall-save-v1-backup', '"nope"');
   const k = new Game();
   assert.equal(k.state.buildings.length, 0);
@@ -413,14 +436,14 @@ test('no duplicate timers: start() twice yields one interval', () => {
 test('no negative resources after heavy random play', () => {
   const g = fresh();
   give(g, { wood: 1000, stone: 1000, food: 300, iron: 100 });
-  g.state.buildings.push({ uid: 'b1', id: 'storage', level: 3 }, { uid: 'b2', id: 'smallHouse', level: 3 });
+  g.state.buildings.push({ uid: 'b1', id: 'lumberYard', level: 3 }, { uid: 'b2', id: 'smallHouse', level: 3 });
   for (let i = 0; i < 4; i++) g.addVillager();
   g.advance(5 * DAY_SECONDS);
   for (const [id, v] of Object.entries(g.state.resources)) { assert.ok(v >= 0 && Number.isFinite(v), id); }
 });
 test('resources only come from sources: lifetime >= stock', () => {
   const g = fresh();
-  g.state.buildings.push({ uid: 'b1', id: 'woodcutterHut', level: 2 }, { uid: 'b2', id: 'storage', level: 1 });
+  g.state.buildings.push({ uid: 'b1', id: 'woodcutterHut', level: 2 }, { uid: 'b2', id: 'lumberYard', level: 1 });
   g.state.unlocks.professions = true;
   const v = g.addVillager(); g.assignVillager(v.id, 'woodcutter');
   g.state.resources.food = 100;
@@ -431,7 +454,7 @@ test('resources only come from sources: lifetime >= stock', () => {
 test('combat/dungeon/expedition work without crashing', () => {
   const g = fresh();
   g.state.unlocks = { ...g.state.unlocks, heroes: true, map: true, dungeonTab: true };
-  g.state.buildings.push({ uid: 'b1', id: 'storage', level: 5 }, { uid: 'b2', id: 'dungeonEntrance', level: 1 }, { uid: 'b3', id: 'barracks', level: 1 });
+  g.state.buildings.push({ uid: 'b1', id: 'lumberYard', level: 5 }, { uid: 'b2', id: 'dungeonEntrance', level: 1 }, { uid: 'b3', id: 'barracks', level: 1 });
   give(g, { gold: 500, food: 300, torch: 20 });
   g.recruitHero();
   assert.equal(g.state.heroes.length, 1);
@@ -443,6 +466,85 @@ test('combat/dungeon/expedition work without crashing', () => {
   g.startDungeon();
   for (let i = 0; i < 6; i++) g.dungeonStep('continue');
   assert.ok(g.state.tracking.actions > 0);
+});
+
+test('auto-hire: idle villagers take free seats by themselves and unemployed are counted', () => {
+  const g = fresh();
+  g.state.unlocks.villagerMgmt = true;
+  g.state.buildings.push({ uid: 'b1', id: 'farm', level: 1 }, { uid: 'b2', id: 'woodcutterHut', level: 1 });
+  for (let i = 0; i < 6; i++) g.addVillager();
+  g.checkUnlocks({ silent: true });
+  const st = g.getStats();
+  assert.equal(st.employed, 4, 'two seats per building level, two buildings');
+  assert.equal(st.unemployed, 2);
+  assert.equal(g.countJob('farmer'), 2);
+  assert.equal(g.countJob('woodcutter'), 2);
+  g.state.buildings.push({ uid: 'b3', id: 'quarry', level: 1 });
+  g.checkUnlocks({ silent: true });
+  assert.equal(g.getStats().unemployed, 0, 'a new workplace is staffed automatically');
+});
+test('auto-hire heads for food first when food is low', () => {
+  const g = fresh();
+  g.state.unlocks.villagerMgmt = true;
+  g.state.buildings.push({ uid: 'b1', id: 'farm', level: 1 }, { uid: 'b2', id: 'woodcutterHut', level: 1 });
+  g.addVillager(); g.addVillager();
+  g.state.resources.food = 0;
+  g.checkUnlocks({ silent: true });
+  assert.equal(g.countJob('farmer'), 2);
+});
+test('auto-hire can be switched off and nobody is hired', () => {
+  const g = fresh();
+  g.state.unlocks.villagerMgmt = true;
+  g.state.buildings.push({ uid: 'b1', id: 'farm', level: 1 });
+  g.setAutoHire(false);
+  g.addVillager();
+  g.checkUnlocks({ silent: true });
+  assert.equal(g.getStats().unemployed, 1);
+});
+test('families form automatically only when happy, fed and housed', () => {
+  const g = fresh();
+  g.state.unlocks.villagerMgmt = true;
+  g.state.buildings.push({ uid: 'b1', id: 'smallHouse', level: 5 }, { uid: 'w', id: 'well', level: 1 });
+  g.addVillager(); g.addVillager();
+  g.state.resources.food = 0;
+  const rnd = Math.random; Math.random = () => 0;
+  try {
+    g.familyTick();
+    assert.equal(g.state.families.length, 0, 'hungry settlements do not start families');
+    g.state.resources.food = 100;
+    g.familyTick();
+    assert.equal(g.state.families.length, 1);
+    g.familyTick();
+    assert.equal(g.state.families[0].kids.length, 1, 'a child is born');
+    g.state.buildings = g.state.buildings.filter(b => b.id !== 'smallHouse');
+    g.state.buildings.push({ uid: 'b9', id: 'smallHouse', level: 1 });
+    g.familyTick();
+    assert.equal(g.state.families[0].kids.length, 1, 'no room means no second child');
+  } finally { Math.random = rnd; }
+});
+test('children grow into villagers after a day, only when a bed is free', () => {
+  const g = fresh();
+  g.state.unlocks.villagerMgmt = true;
+  g.state.buildings.push({ uid: 'b1', id: 'smallHouse', level: 1 });
+  g.addVillager(); g.addVillager();
+  g.state.families.push({ id: 'f1', members: [g.state.villagers[0].id, g.state.villagers[1].id], kids: [g.state.clock] });
+  g.advance(DAY_SECONDS + 10);
+  assert.equal(g.state.villagers.length, 2, 'housing full: child waits');
+  g.state.buildings.push({ uid: 'b2', id: 'smallHouse', level: 1 });
+  g.advance(60);
+  assert.equal(g.state.villagers.length, 3);
+  assert.equal(g.state.families[0].kids.length, 0);
+});
+test('v2 save with generic Storage migrates to Lumber Yard + Stoneyard + Granary', () => {
+  const old = { version: 2, lastSaved: Date.now() - 1000, resources: { wood: 100, food: 20 }, buildings: [{ uid: 'b1', id: 'campfire', level: 1 }, { uid: 'b2', id: 'storage', level: 2 }], villagers: [], families: [{ id: 'f1', members: [], children: 2 }] };
+  store.set(SAVE_KEY, JSON.stringify(old));
+  const g = new Game();
+  assert.equal(g.state.version, 3);
+  assert.equal(g.countBuilt('lumberYard'), 1);
+  assert.equal(g.buildingLevel('granary'), 2);
+  assert.equal(g.capOf('wood'), 150 + 1000);
+  assert.ok(g.unlocked('ledger'));
+  assert.equal(g.state.families[0].kids.length, 2);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

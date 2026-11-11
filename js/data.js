@@ -1,6 +1,6 @@
-export const VERSION = 2;
+export const VERSION = 3;
 
-export { PROFESSIONS, PROFESSION_BY_ID, BUILDINGS, BUILDING_BY_ID, ACTIONS, BASE_STORAGE, VILLAGE_TIERS } from './buildings.js';
+export { PROFESSIONS, PROFESSION_BY_ID, BUILDINGS, BUILDING_BY_ID, ACTIONS, BASE_STORAGE, VILLAGE_TIERS, STORAGE_CLASSES, CLASS_OF, BUILDING_GROUPS } from './buildings.js';
 
 export const RESOURCES = [
   ['wood','Wood',100], ['stone','Stone',60], ['food','Food',100], ['gold','Gold',100],

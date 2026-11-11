@@ -1,7 +1,8 @@
 import { Game } from './state.js';
 import {
-  RESOURCES, PROFESSIONS, BUILDINGS, REGIONS, ENEMIES, BOSSES, RELICS, BLESSINGS,
-  PETS, MOUNTS, RECIPES, RESEARCH, QUESTS, ACHIEVEMENTS, ACTIONS, RESOURCE_BY_ID, TRADABLE, PROFESSION_BY_ID, VILLAGE_TIERS
+  RESOURCES, PROFESSIONS, BUILDINGS, REGIONS, ENEMIES, BOSSES, RELICS, BLESSINGS, PETS, MOUNTS, RECIPES,
+  RESEARCH, QUESTS, ACHIEVEMENTS, ACTIONS, RESOURCE_BY_ID, TRADABLE, PROFESSION_BY_ID, VILLAGE_TIERS,
+  STORAGE_CLASSES, CLASS_OF, BUILDING_GROUPS
 } from './data.js';
 import { TABS } from './unlocks.js';
 import { SCHEDULES } from './time.js';
@@ -14,11 +15,16 @@ window.__emberfallGame = game;
 const root = document.querySelector('#app');
 let modal = null;
 
-// Interface text size: a viewer preference stored apart from the game save.
+// ---------------------------------------------------------------------------------------------
+// Viewer preferences (kept apart from the game save): text size and which dropdowns are open.
+// ---------------------------------------------------------------------------------------------
 const UI_KEY = 'emberfall-ui-scale';
+const PANELS_KEY = 'emberfall-ui-panels';
 const UI_MIN = 70, UI_MAX = 200, UI_STEP = 10;
 let uiScale = 100;
+let panels = {};
 try { const v = Number(localStorage.getItem(UI_KEY)); if (v >= UI_MIN && v <= UI_MAX) uiScale = Math.round(v); } catch { /* storage unavailable */ }
+try { const p = JSON.parse(localStorage.getItem(PANELS_KEY) || '{}'); if (p && typeof p === 'object') panels = p; } catch { /* ignore */ }
 function applyScale() { document.documentElement.style.setProperty('--ui-scale', String(uiScale / 100)); }
 function setScale(value) {
   uiScale = Math.min(UI_MAX, Math.max(UI_MIN, Math.round(value)));
@@ -26,8 +32,13 @@ function setScale(value) {
   applyScale();
   render();
 }
+function savePanels() { try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)); } catch { /* ignore */ } }
+const isOpen = (id, fallback = false) => (id in panels ? !!panels[id] : fallback);
 applyScale();
 
+// ---------------------------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------------------------
 const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
 const fmt = value => game.format(value);
 const cost = object => game.describeCost(object);
@@ -38,8 +49,13 @@ const time = ms => {
 const pct = value => `${Math.max(0, Math.min(100, value)).toFixed(0)}%`;
 const progress = (current, target, cls = '') => `<div class="progress ${cls}"><span style="width:${Math.min(100, target ? current / target * 100 : 0)}%"></span></div>`;
 const attribute = (name, value) => `data-${name}="${esc(value)}"`;
-const rate = v => (Math.abs(v) < .05 ? '' : `${v > 0 ? '+' : '−'}${fmt(Math.abs(v))}/d`);
+const rate = v => (Math.abs(v) < .05 ? '' : `${v > 0 ? '+' : '−'}${fmt(Math.abs(v))}`);
 const clockTime = at => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+// A dropdown that remembers whether the player left it open.
+function drop(id, summary, body, { open = false, cls = '' } = {}) {
+  return `<details class="drop ${cls}" data-panel="${esc(id)}" ${isOpen(id, open) ? 'open' : ''}><summary>${summary}</summary><div class="drop-body">${body}</div></details>`;
+}
 
 const EFFECT_LABELS = {
   happiness: 'happiness', recruit: '% arrival chance', craft: 'crafting', combat: 'combat strength', guard: 'guards', recovery: '% hero recovery',
@@ -49,49 +65,64 @@ const EFFECT_LABELS = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// Building cards
+// Building cards: a bordered card with the essentials, and an Info dropdown for the rest.
 // ---------------------------------------------------------------------------------------------
+function storeGoods(def) {
+  const info = def.capClass && def.capClass !== 'all' ? STORAGE_CLASSES[def.capClass] : null;
+  return info ? info.items.map(id => RESOURCE_BY_ID[id].name.toLowerCase()).join(', ') : 'every bulk good';
+}
 function statsAt(def, level) {
   const parts = [];
-  if (def.capTable) parts.push(`${def.capKey === 'housing' ? 'housing' : 'storage'} ${def.capTable[Math.min(level, def.capTable.length) - 1].toLocaleString()}`);
+  if (def.capTable) {
+    const n = def.capTable[Math.min(level, def.capTable.length) - 1].toLocaleString();
+    parts.push(def.capKey === 'housing' ? `housing ${n}` : `holds ${n} (${storeGoods(def)})`);
+  }
   for (const [key, value] of Object.entries(def.effect)) parts.push(`+${value * level} ${EFFECT_LABELS[key] || key}`);
   for (const [id, amount] of Object.entries(def.passive)) parts.push(`+${fmt(amount * level)} ${RESOURCE_BY_ID[id].name}/h ${def.allDay ? '(all day)' : '(day shift)'}`);
   const jobs = PROFESSIONS.filter(p => p.requires.includes(def.id));
   if (jobs.length) parts.push(`${2 * level} seats for ${jobs.map(j => j.name.toLowerCase()).join('/')}`);
   return parts.join(' · ') || 'a necessary foundation';
 }
+const buy = (label, price, attr, enabled) => `<button class="buy" ${attr} ${enabled ? '' : 'disabled'}>${label}<small>${esc(price)}</small></button>`;
 
 function buildingCard(def) {
   const insts = game.instances(def.id);
-  const canMore = insts.length < def.max;
+  const built = insts.length;
+  const canMore = built < def.max;
   const buildCost = game.buildCost(def);
-  const exceeds = game.costExceedsStorage(buildCost);
-  const rows = insts.map(inst => {
+  const head = !built ? 'not built' : built === 1 ? `Lv ${insts[0].level}/10` : `${built} built`;
+  const rows = insts.map((inst, i) => {
     const maxed = inst.level >= 10;
-    const upCost = maxed ? null : game.upgradeCost(inst);
-    return `<div class="instance"><div class="card-row"><span>${insts.length > 1 ? `#${insts.indexOf(inst) + 1} ` : ''}Lv ${inst.level}/10</span>
-      <button ${attribute('upgrade', inst.uid)} ${maxed || !game.canAfford(upCost) ? 'disabled' : ''}>${maxed ? 'Fully improved' : `Upgrade → Lv ${inst.level + 1}`}</button></div>
-      <div class="tiny dim">Now: ${statsAt(def, inst.level)}</div>
-      ${maxed ? '' : `<div class="tiny dim">Next: ${statsAt(def, inst.level + 1)}<br>${cost(upCost)}${game.costExceedsStorage(upCost) ? ' <span class="warning">(more storage needed)</span>' : ''}</div>`}</div>`;
+    const up = maxed ? null : game.upgradeCost(inst);
+    const cap = game.capacityOf(inst);
+    return `<div class="inst"><span>${built > 1 ? `#${i + 1} ` : ''}Lv ${inst.level}/10${cap ? ` · ${cap.toLocaleString()}` : ''}</span>${maxed ? '<span class="dim">finest level</span>' : buy(`Upgrade → ${inst.level + 1}`, cost(up), attribute('upgrade', inst.uid), game.canAfford(up))}</div>`;
   }).join('');
-  const buildLine = canMore
-    ? `<div class="cost">${insts.length ? 'Another' : 'Build'}: ${cost(buildCost)}${exceeds ? ' <span class="warning">(more storage needed)</span>' : ''}<br><span class="dim">${statsAt(def, 1)}</span></div><button ${attribute('build', def.id)} ${game.canAfford(buildCost) ? '' : 'disabled'}>${insts.length ? 'Build another' : 'Build'}</button>`
-    : '<div class="cost dim">The most this settlement can hold.</div>';
-  return `<article class="card"><div class="card-row"><h3>${def.name}${def.max > 1 ? ` <span class="dim">${insts.length}/${def.max}</span>` : ''}</h3><span class="pill">${def.tier}</span></div><p>${def.description}</p>${rows}${buildLine}</article>`;
+  const manage = built > 2 ? drop(`manage:${def.id}`, `Manage all ${built}`, rows) : rows;
+  const info = [`<p>${def.description}</p>`, `<div class="tiny dim">Each level: ${statsAt(def, 1)}</div>`];
+  if (built) { const inst = insts[0]; if (inst.level < 10) info.push(`<div class="tiny dim">Next level: ${statsAt(def, inst.level + 1)}</div>`); }
+  info.push(`<div class="tiny dim">Up to ${def.max} may be built. Upgrades go to level 10.</div>`);
+  const exceeds = canMore && game.costExceedsStorage(buildCost);
+  return `<article class="card building ${built ? 'built' : ''}"><div class="card-head"><h3>${def.name}</h3><span class="pill">${head}</span></div>
+    <div class="card-line">${statsAt(def, built ? insts[0].level : 1)}</div>${manage}
+    ${canMore ? buy(built ? 'Build another' : 'Build', cost(buildCost), attribute('build', def.id), game.canAfford(buildCost)) : `<div class="tiny dim">${def.max === 1 ? 'Only one can be built.' : 'No more can be built.'}</div>`}
+    ${exceeds ? '<div class="tiny warning">Needs a bigger store to hold the materials.</div>' : ''}
+    ${drop(`info:${def.id}`, 'Info', info.join(''), { cls: 'info' })}</article>`;
 }
 
 function availableBuildings(tiers) { return BUILDINGS.filter(b => tiers.includes(b.tier) && game.buildingAvailable(b)); }
+function readyCount(defs) {
+  return defs.filter(def => (game.countBuilt(def.id) < def.max && game.canAfford(game.buildCost(def))) || game.instances(def.id).some(i => i.level < 10 && game.canAfford(game.upgradeCost(i)))).length;
+}
 
 // ---------------------------------------------------------------------------------------------
-// Sidebar
+// Sidebar: only what matters at a glance. Detail lives in dropdowns and on the Stores tab.
 // ---------------------------------------------------------------------------------------------
 function warnings(stats) {
   const s = game.state;
   const out = [];
   if (s.hunger > 0) out.push('Villagers are starving. Work is slow and some may leave.');
   else if (s.hungerFlags.low) out.push('Food is running low.');
-  const full = RESOURCES.filter(r => game.isRevealed(r.id) && stats.ledger[r.id].full && r.id !== 'prestige' && stats.ledger[r.id].overflow > 0.05);
-  full.forEach(r => out.push(`Storage is full: ${r.name} is overflowing.`));
+  RESOURCES.filter(r => game.isRevealed(r.id) && stats.ledger[r.id].full && stats.ledger[r.id].overflow > 0.05).forEach(r => out.push(`${game.storeName(r.id)} is full: ${r.name} is overflowing.`));
   if (stats.pop > stats.housing) out.push('Some villagers have no proper housing.');
   if (stats.pop && stats.happiness < 40) out.push('The settlement is unhappy. Work and arrivals suffer.');
   return out;
@@ -99,48 +130,40 @@ function warnings(stats) {
 
 function sidebar(stats) {
   const s = game.state;
-  const info = game.timeInfo();
   const resources = RESOURCES.filter(r => game.isRevealed(r.id));
   const relics = s.relics.map(id => RELICS.find(r => r.id === id)).filter(Boolean);
   const warn = warnings(stats);
   const parts = [];
-  if (game.unlocked('camp')) {
-    parts.push(`<div class="section"><div class="section-title">Time</div>
-      <div class="stat-row"><span>Day ${info.day}</span><span>${info.time}</span><span class="dim">${info.daytime ? 'day' : 'night'}</span></div>
-      <div class="stat-row"><span>${info.season}</span><span>${info.weather}</span><span class="dim"></span></div>
-      ${s.villagers.length ? `<div class="tiny dim">${info.activity}</div>` : ''}</div>`);
-  }
-  parts.push(`<div class="section"><div class="section-title">Resources ${game.unlocked('ledger') || stats.ledger.wood.cap < 1e6 ? `<span class="dim">cap ${fmt(stats.fx.storage)}</span>` : ''}</div>${resources.map(r => {
+  parts.push(`<div class="section"><div class="section-title">Resources</div>${resources.map(r => {
     const l = stats.ledger[r.id];
-    const net = rate(l.net);
-    return `<div class="resource-row"><span class="resource-name">${r.name}</span><span class="amount ${l.full && r.id !== 'prestige' ? 'warning' : ''}">${fmt(l.stock)}${l.full && r.id !== 'prestige' ? ' full' : ''}</span><span class="rate ${l.net > 0 ? 'positive' : 'negative'}">${net}</span></div>`;
+    const tip = `${r.name}: ${rate(l.net) || 'no change'}/day${Number.isFinite(l.cap) ? ` · limit ${fmt(l.cap)} (${game.storeName(r.id)})` : ' · no storage limit'}`;
+    return `<div class="resource-row r2" title="${esc(tip)}"><span class="resource-name">${r.name}</span><span class="amount ${l.full ? 'warning' : ''}">${fmt(l.stock)}${l.full ? ' full' : ''}</span></div>`;
   }).join('')}</div>`);
   if (warn.length) parts.push(`<div class="section"><div class="section-title">Warnings</div>${warn.map(w => `<div class="notice">${esc(w)}</div>`).join('')}</div>`);
   if (game.unlocked('villagerMgmt')) {
     const foodDays = stats.foodUse ? game.resource('food') / stats.foodUse : null;
-    parts.push(`<div class="section"><div class="section-title">Population</div>
-      <div class="stat-row"><span>Villagers</span><span>${stats.pop} / ${stats.housing}</span><span class="dim">housing</span></div>
-      <div class="stat-row"><span>Happiness</span><span class="${stats.happiness > 80 ? 'positive' : stats.happiness < 40 ? 'negative' : ''}">${pct(stats.happiness)}</span><span class="dim"></span></div>
-      <div class="stat-row"><span>Arrival chance</span><span>${stats.housing > stats.pop ? `${stats.recruitChance}%` : '—'}</span><span class="dim">/ min</span></div>
-      <div class="stat-row"><span>Food eaten</span><span>${fmt(stats.foodUse)}</span><span class="dim">/ day${foodDays !== null ? `, ${foodDays.toFixed(1)}d left` : ''}</span></div>
-      ${stats.guard ? `<div class="stat-row"><span>Guards</span><span>${stats.guard}</span><span class="dim">watch</span></div>` : ''}</div>`);
+    parts.push(`<div class="section"><div class="section-title">People</div>
+      <div class="stat-row r2"><span>Villagers</span><span>${stats.pop} / ${stats.housing}</span></div>
+      <div class="stat-row r2"><span>Working</span><span>${stats.employed}</span></div>
+      <div class="stat-row r2"><span>Unemployed</span><span class="${stats.unemployed ? 'warning' : ''}">${stats.unemployed}</span></div>
+      <div class="stat-row r2"><span>Mood</span><span class="${stats.happiness > 80 ? 'positive' : stats.happiness < 40 ? 'negative' : ''}">${pct(stats.happiness)}</span></div>
+      ${drop('side:people', 'More', `<div class="stat-row r2"><span>Arrival chance</span><span>${stats.housing > stats.pop ? `${stats.recruitChance}%/min` : 'no free bed'}</span></div>
+        <div class="stat-row r2"><span>Food eaten</span><span>${fmt(stats.foodUse)}/day${foodDays !== null ? ` · ${foodDays.toFixed(1)}d left` : ''}</span></div>
+        ${stats.children ? `<div class="stat-row r2"><span>Children</span><span>${stats.children}</span></div>` : ''}${stats.away ? `<div class="stat-row r2"><span>Away</span><span>${stats.away}</span></div>` : ''}
+        ${stats.guard ? `<div class="stat-row r2"><span>Guards</span><span>${stats.guard}</span></div>` : ''}`, { cls: 'small' })}</div>`);
   }
+  const bonusRows = [];
+  if (s.buildings.length) bonusRows.push(`<div class="stat-row r2"><span>Building levels</span><span>${game.totalBuildingLevels()}</span></div>`);
+  if (game.unlocked('research')) bonusRows.push(`<div class="stat-row r2"><span>Research</span><span>${game.totalResearch()} theories</span></div>`);
+  if (game.unlocked('map')) bonusRows.push(`<div class="stat-row r2"><span>Travel speed</span><span>+${stats.travel.toFixed(0)}%</span></div>`);
+  if (game.costDiscount() > 0) bonusRows.push(`<div class="stat-row r2"><span>Build discount</span><span>${(game.costDiscount() * 100).toFixed(0)}%</span></div>`);
+  if (s.prestigeCount) bonusRows.push(`<div class="stat-row r2"><span>Prestige cycles</span><span>${s.prestigeCount}</span></div>`);
+  if (game.hasBuilding('temple')) BLESSINGS.filter(b => game.blessingLevel(b.id) > 0).forEach(b => bonusRows.push(`<div class="stat-row r2"><span>${b.name}</span><span>Lv ${game.blessingLevel(b.id)}</span></div>`));
+  if (bonusRows.length) parts.push(`<div class="section">${drop('side:bonuses', 'Bonuses', bonusRows.join(''))}</div>`);
   if (game.unlocked('ancientRuins')) {
-    parts.push(`<div class="section"><div class="section-title">Relics <span class="dim">${relics.length}/${RELICS.length}</span></div>${relics.length
+    parts.push(`<div class="section">${drop('side:relics', `Relics <span class="dim">${relics.length}/${RELICS.length}</span>`, relics.length
       ? `<ul class="mini-list">${relics.map(r => `<li title="${esc(r.description)}">${esc(r.name)} <span class="dim">+${r.value}% ${esc(r.kind)}</span></li>`).join('')}</ul>`
-      : '<div class="empty">Nothing strange has been found.</div>'}</div>`);
-  }
-  if (game.hasBuilding('temple')) {
-    const items = BLESSINGS.filter(b => game.blessingLevel(b.id) > 0);
-    parts.push(`<div class="section"><div class="section-title">Blessings</div>${items.length ? items.map(b => `<div class="stat-row"><span>${b.name}</span><span>Lv ${game.blessingLevel(b.id)}</span><span></span></div>`).join('') : '<div class="empty">The old powers are quiet.</div>'}</div>`);
-  }
-  if (s.buildings.length) {
-    parts.push(`<div class="section"><div class="section-title">Bonuses</div>
-      <div class="stat-row"><span>Building levels</span><span>${game.totalBuildingLevels()}</span><span class="dim">total</span></div>
-      ${game.unlocked('research') ? `<div class="stat-row"><span>Research</span><span>${game.totalResearch()}</span><span class="dim">theories</span></div>` : ''}
-      ${game.unlocked('map') ? `<div class="stat-row"><span>Travel</span><span>${stats.travel.toFixed(0)}%</span><span class="dim">faster</span></div>` : ''}
-      ${game.costDiscount() > 0 ? `<div class="stat-row"><span>Build discount</span><span>${(game.costDiscount() * 100).toFixed(0)}%</span><span class="dim"></span></div>` : ''}
-      ${s.prestigeCount ? `<div class="stat-row"><span>Prestige</span><span>${s.prestigeCount}</span><span class="dim">cycles</span></div>` : ''}</div>`);
+      : '<div class="empty">Nothing strange has been found.</div>')}</div>`);
   }
   return `<aside class="sidebar">${parts.join('')}</aside>`;
 }
@@ -152,97 +175,124 @@ function rewardText(action) {
   const entries = Object.entries(action.rewards);
   const shown = entries.filter(([resource], i) => i === 0 || game.isRevealed(resource));
   const hidden = shown.length < entries.length;
-  return shown.map(([resource, amount]) => `${amount > 0 ? '+' : ''}${amount} ${RESOURCE_BY_ID[resource]?.name || resource}`).join(' · ') + (hidden ? ' · and other finds' : '');
+  return shown.map(([resource, amount]) => `${amount > 0 ? '+' : ''}${amount} ${RESOURCE_BY_ID[resource]?.name || resource}`).join(' · ') + (hidden ? ' · more' : '');
 }
 
 function actionCard(id) {
   const action = ACTIONS[id];
   const waiting = (game.state.actionCooldowns[id] || 0) - Date.now();
   const enabled = waiting <= 0 && (!action.rewards.torch || game.resource('torch') >= Math.abs(action.rewards.torch));
-  return `<article class="action-card"><h3>${action.name}</h3><p>${action.description}</p><div class="cost">${rewardText(action)}</div><button ${attribute('action', id)} ${enabled ? '' : 'disabled'}>${waiting > 0 ? time(waiting) : action.name}</button></article>`;
+  return `<article class="action-card" title="${esc(action.description)}"><button class="act" ${attribute('action', id)} ${enabled ? '' : 'disabled'}>${waiting > 0 ? `${action.name} <small>${time(waiting)}</small>` : action.name}</button><div class="cost">${rewardText(action)}</div></article>`;
 }
-
 function actionGrid(tab) {
-  const ids = game.actionsFor(tab);
+  const ids = game.actionsFor(tab === 'Main' ? 'Camp' : tab);
   return ids.length ? `<div class="action-grid">${ids.map(actionCard).join('')}</div>` : '';
 }
+const head = (title, sub = '') => `<h1 class="headline">${title}</h1>${sub ? `<p class="subline">${sub}</p>` : ''}`;
 
-function ledgerPanel(stats) {
-  const rows = RESOURCES.filter(r => game.isRevealed(r.id) && r.id !== 'prestige').map(r => {
-    const l = stats.ledger[r.id];
-    return `<tr><td>${r.name}</td><td>${fmt(l.stock)} / ${fmt(l.cap)}</td><td class="positive">${l.prod ? `+${fmt(l.prod)}` : '—'}</td><td class="negative">${l.cons ? `−${fmt(l.cons)}` : '—'}</td><td class="${l.net >= 0 ? 'positive' : 'negative'}">${l.net >= 0 ? '+' : '−'}${fmt(Math.abs(l.net))}</td><td>${l.net > 0 ? `+${fmt(l.accepted)}` : '—'}</td><td class="${l.overflow > .05 ? 'warning' : 'dim'}">${l.overflow > .05 ? `+${fmt(l.overflow)}` : '—'}</td></tr>`;
-  }).join('');
-  return `<div class="section"><div class="section-title">Stores & accounts <span class="dim">per in-game day (20 min)</span></div>
-    <table class="wide-table"><thead><tr><th>Resource</th><th>Stored</th><th>Produced</th><th>Used</th><th>Net</th><th>Accepted</th><th>Overflow</th></tr></thead><tbody>${rows}</tbody></table>
-    ${RESOURCES.some(r => stats.ledger[r.id].full && stats.ledger[r.id].overflow > .05) ? '<div class="notice">Storage is full. Upgrade a Storage or build another to stop losing production.</div>' : ''}</div>`;
+function baseView() {
+  const campfire = BUILDINGS.find(b => b.id === 'campfire');
+  const intro = game.state.tracking.actions < 3
+    ? 'You stand alone at the edge of the dark. Cold air, the sound of leaves, and trees close at hand. A fire would change everything, and a fire needs wood.'
+    : game.buildingAvailable(campfire) ? 'You have enough wood to make a fire.' : 'The wood pile grows. Keep going.';
+  return `${head('EMBERFALL', intro)}${actionGrid('Main')}
+    ${game.buildingAvailable(campfire) && !game.hasBuilding('campfire') ? `<div class="card-grid">${buildingCard(campfire)}</div>` : ''}`;
 }
 
-function campTab(stats) {
+function mainTab(stats) {
+  if (!game.unlocked('camp')) return baseView();
   const campfire = BUILDINGS.find(b => b.id === 'campfire');
-  return `<div class="tab-kicker">The fire</div><h1 class="headline">Camp</h1><p class="subline">The fire keeps the worst of the dark at bay. What you gather here feeds everything else.</p>
-    ${actionGrid('Camp')}
-    <div class="section two-col"><div><div class="section-title">Survival</div>${buildingCard(campfire)}</div>
-    <div><div class="section-title">Notes</div><ul class="mini-list"><li>Every villager eats ${fmt(2)} food per day. Food use now: ${fmt(stats.foodUse)}/day.</li><li>One day lasts 20 minutes: 14 of daylight, 6 of night.</li><li>${game.state.villagers.length ? 'Villagers work from 08:00 to 17:00 by default.' : 'Someone may come to the fire if it stays warm and there is food.'}</li></ul></div></div>`;
+  const notes = `<ul class="mini-list"><li>Every villager eats 2 food per day. Food use now: ${fmt(stats.foodUse)}/day.</li><li>One day lasts 20 minutes: 14 of daylight, 6 of night.</li><li>${game.state.villagers.length ? 'Villagers work from 08:00 to 17:00 by default.' : 'Someone may come to the fire if it stays warm and there is food.'}</li></ul>`;
+  return `${head('Camp', 'The fire keeps the worst of the dark at bay.')}${actionGrid('Main')}
+    <div class="card-grid" style="margin-top:10px">${buildingCard(campfire)}</div>${drop('main:notes', 'Notes', notes)}`;
 }
 
 function villageTab(stats) {
-  const housing = game.unlocked('housingMgmt') ? `<div class="card"><h3>Housing</h3><div class="stat-row"><span>Housing</span><span>${stats.pop} / ${stats.housing}</span><span>${Math.max(0, stats.housing - stats.pop)} free</span></div>${progress(stats.pop, Math.max(1, stats.housing))}<p class="tiny">Villagers need a roof. A recruitment check runs every minute while a bed is free (${stats.recruitChance}% now). Each extra hut adds 2%, a Tavern 5%, and happiness above 80% another 5%. The maximum is 40%.</p></div>` : '';
-  const list = availableBuildings(VILLAGE_TIERS);
-  const blessings = game.hasBuilding('temple') ? `<div class="section"><div class="section-title">Blessings</div><div class="card-grid">${BLESSINGS.map(b => `<article class="card"><h3>${b.name} <span class="dim">Lv ${game.blessingLevel(b.id)}/5</span></h3><p>${b.description}. Each level grants a small permanent improvement.</p><div class="cost">${game.blessingLevel(b.id) >= 5 ? 'Fully awakened' : `Needs ${cost({ essence: 2 + game.blessingLevel(b.id) * 2, ancientDust: 1 + game.blessingLevel(b.id) })}`}</div><button ${attribute('blessing', b.id)} ${game.blessingLevel(b.id) >= 5 ? 'disabled' : ''}>Improve blessing</button></article>`).join('')}</div></div>` : '';
-  return `<div class="tab-kicker">Settlement management</div><h1 class="headline">Village</h1><p class="subline">Raise shelters, workplaces and stores. Everything here must be built before it helps.</p>
-    ${housing}${game.unlocked('ledger') ? ledgerPanel(stats) : ''}
-    <div class="section"><div class="section-title">Construction</div><div class="card-grid">${list.map(buildingCard).join('')}</div></div>${blessings}`;
+  const all = availableBuildings(VILLAGE_TIERS);
+  const housing = game.unlocked('housingMgmt') ? drop('village:housing', `Housing <span class="dim">${stats.pop} / ${stats.housing}</span>`, `${progress(stats.pop, Math.max(1, stats.housing))}<p class="tiny">Villagers need a bed. A recruitment check runs every minute while one is free (${stats.recruitChance}% now): +2% per extra hut, +5% Tavern, +5% above 80% mood, 40% at most.</p>`) : '';
+  const groups = BUILDING_GROUPS.map(([name, ids]) => {
+    const defs = all.filter(b => ids.includes(b.id));
+    if (!defs.length) return '';
+    const ready = readyCount(defs);
+    const builtCount = defs.filter(b => game.hasBuilding(b.id)).length;
+    return drop(`grp:${name}`, `${name} <span class="dim">${builtCount}/${defs.length}${ready ? ` · ${ready} ready` : ''}</span>`, `<div class="card-grid">${defs.map(buildingCard).join('')}</div>`, { open: ready > 0, cls: 'group' });
+  }).join('');
+  const blessings = game.hasBuilding('temple') ? drop('village:blessings', 'Blessings', `<div class="card-grid">${BLESSINGS.map(b => {
+    const lv = game.blessingLevel(b.id);
+    return `<article class="card"><div class="card-head"><h3>${b.name}</h3><span class="pill">Lv ${lv}/5</span></div>${lv >= 5 ? '<div class="tiny dim">Fully awakened</div>' : buy('Improve', cost({ essence: 2 + lv * 2, ancientDust: 1 + lv }), attribute('blessing', b.id), true)}${drop(`info:bless:${b.id}`, 'Info', `<p>${b.description}. Each level adds a small permanent improvement.</p>`, { cls: 'info' })}</article>`;
+  }).join('')}</div>`) : '';
+  return `${head('Village', 'Raise shelters and workplaces. Everything here must be built before it helps.')}${housing}${groups || '<div class="empty">Nothing to build yet.</div>'}${blessings}`;
+}
+
+function storesTab(stats) {
+  const defs = availableBuildings(['Storage']);
+  const classLines = Object.entries(STORAGE_CLASSES).map(([cls, info]) => {
+    const items = info.items.filter(id => game.isRevealed(id));
+    if (!items.length) return '';
+    return `<div class="store-line"><span class="muted">${info.name}</span><span>${items.map(id => `${RESOURCE_BY_ID[id].name} ${fmt(game.resource(id))}/${fmt(stats.ledger[id].cap)}`).join(' · ')}</span></div>`;
+  }).join('');
+  const rows = RESOURCES.filter(r => game.isRevealed(r.id)).map(r => {
+    const l = stats.ledger[r.id];
+    const limited = Number.isFinite(l.cap);
+    return `<tr><td>${r.name}</td><td>${fmt(l.stock)}${limited ? ` / ${fmt(l.cap)}` : ' <span class="dim">no limit</span>'}</td><td class="positive">${l.prod ? `+${fmt(l.prod)}` : '—'}</td><td class="negative">${l.cons ? `−${fmt(l.cons)}` : '—'}</td><td class="${l.net >= 0 ? 'positive' : 'negative'}">${l.net ? `${l.net > 0 ? '+' : '−'}${fmt(Math.abs(l.net))}` : '—'}</td><td class="${l.overflow > .05 ? 'warning' : 'dim'}">${l.overflow > .05 ? `+${fmt(l.overflow)}` : '—'}</td></tr>`;
+  }).join('');
+  const anyFull = RESOURCES.some(r => stats.ledger[r.id].full && stats.ledger[r.id].overflow > .05);
+  return `${head('Stores', 'Each kind of good needs its own store. Gold and other special items need none.')}
+    ${anyFull ? '<div class="notice">A store is full. Upgrade it or build another to stop losing production.</div>' : ''}
+    <div class="panel-box">${classLines || '<div class="empty">Build a store to see what it holds.</div>'}</div>
+    ${drop('stores:accounts', 'Accounts <span class="dim">per in-game day</span>', `<table class="wide-table"><thead><tr><th>Resource</th><th>Stored</th><th>Made</th><th>Used</th><th>Net</th><th>Overflow</th></tr></thead><tbody>${rows}</tbody></table>`, { open: true })}
+    ${drop('stores:build', 'Build stores', `<div class="card-grid">${defs.map(buildingCard).join('') || '<div class="empty">No stores available yet.</div>'}</div>`, { open: true })}`;
 }
 
 function villagersTab(stats) {
   const s = game.state;
-  const assignable = game.unlocked('professions');
-  const parts = stats.happinessParts.map(([label, d]) => `<div class="stat-row"><span>${label}</span><span class="${d > 0 ? 'positive' : d < 0 ? 'negative' : ''}">${d > 0 ? '+' : ''}${d}</span><span></span></div>`).join('');
-  const table = s.villagers.length ? `<table class="wide-table"><thead><tr><th>Name</th><th>Age</th><th>Nature</th><th>Lv</th><th>Work</th><th>Hours</th><th>Mood</th></tr></thead><tbody>${s.villagers.map(v => {
-    const job = PROFESSION_BY_ID[v.profession] || PROFESSIONS[0];
+  const chips = PROFESSIONS.filter(p => p.id !== 'idle' && (game.jobSlots(p) > 0 || s.villagers.some(v => v.profession === p.id))).map(p => {
+    const filled = s.villagers.filter(v => v.profession === p.id).length;
+    const slots = game.jobSlots(p);
+    return `<span class="chip ${Number.isFinite(slots) && filled >= slots ? 'full' : ''}" title="${esc(p.description)}">${p.name} ${filled}/${Number.isFinite(slots) ? slots : '∞'}</span>`;
+  }).join('');
+  const roster = s.villagers.length ? `<table class="wide-table"><thead><tr><th>Name</th><th>Nature</th><th>Lv</th><th>Work</th><th>Hours</th><th>Mood</th></tr></thead><tbody>${s.villagers.map(v => {
     const options = PROFESSIONS.filter(p => p.id === v.profession || game.jobAvailable(p)).map(p => {
       const taken = s.villagers.filter(x => x.profession === p.id).length;
       const slots = game.jobSlots(p);
       return `<option value="${p.id}" ${p.id === v.profession ? 'selected' : ''}>${p.name}${p.id === 'idle' ? '' : ` (${taken}/${Number.isFinite(slots) ? slots : '∞'})`}</option>`;
     }).join('');
     const schedules = game.availableSchedules(v);
-    return `<tr><td>${esc(v.name)}${v.away ? ' <span class="dim">away</span>' : ''}</td><td>${v.age}</td><td><span class="pill">${esc(v.personality?.name)}</span></td><td>${v.skill}</td>
-      <td>${assignable ? `<select ${attribute('assign', v.id)}>${options}</select>` : '<span class="dim">idle</span>'}<div class="tiny dim">${Object.entries(job.production).map(([id, n]) => `+${n} ${RESOURCE_BY_ID[id]?.name}/h`).join(', ')}</div></td>
+    return `<tr><td>${esc(v.name)} <span class="dim">${v.age}</span>${v.away ? ' <span class="dim">away</span>' : ''}</td><td><span class="pill">${esc(v.personality?.name)}</span></td><td>${v.skill}</td>
+      <td><select ${attribute('assign', v.id)}>${options}</select></td>
       <td>${schedules.length > 1 ? `<select ${attribute('schedule', v.id)}>${schedules.map(id => `<option value="${id}" ${id === v.schedule ? 'selected' : ''}>${SCHEDULES[id].name}</option>`).join('')}</select>` : `<span class="dim">${SCHEDULES[v.schedule]?.name || ''}</span>`}</td>
       <td class="${v.happiness < 40 ? 'negative' : ''}">${pct(v.happiness)}</td></tr>`;
   }).join('')}</tbody></table>` : '<div class="empty">No villagers yet.</div>';
-  const families = `<div class="card"><h3>Families <span class="pill">optional</span></h3><p>${s.families.length ? `${s.families.length} famil${s.families.length > 1 ? 'ies' : 'y'} established.` : 'Friendships can grow without replacing new arrivals.'}</p><button ${attribute('family', 'join')} ${s.villagers.filter(v => !v.family).length < 2 ? 'disabled' : ''}>Encourage a friendship</button>${s.families.some(f => f.children > 0) ? ` <button ${attribute('family', 'grow')}>Welcome grown children</button>` : ''}${s.families.map(f => `<div class="card-row" style="margin-top:5px"><span class="tiny">${f.children} child${f.children === 1 ? '' : 'ren'}</span><button ${attribute('child', f.id)}>Prepare for child (15 Food)</button></div>`).join('')}</div>`;
-  return `<div class="tab-kicker">The people of the fire</div><h1 class="headline">Villagers</h1><p class="subline">${assignable ? 'Choose each villager’s work yourself. Jobs need a workplace with free seats.' : 'Professions can be assigned once three people live here.'}</p>
-    <div class="two-col"><div class="card"><h3>Mood ${pct(stats.happiness)}</h3>${parts}</div><div class="card"><h3>The day</h3><p>${game.timeInfo().activity} now. Default routine: 06-08 breakfast, 08-17 work, 17-19 rest, 19-22 dinner and company, 22-06 sleep. Guards may take the night watch.</p><div class="stat-row"><span>Food stored</span><span>${fmt(game.resource('food'))}</span><span>${fmt(stats.foodUse)}/day eaten</span></div></div></div>
-    <div class="section"><div class="section-title">Roster</div>${table}</div>
-    ${game.unlocked('villagerEvents') ? `<div class="section">${families}</div>` : ''}`;
+  const mood = stats.happinessParts.map(([label, d]) => `<div class="stat-row r2"><span>${label}</span><span class="${d > 0 ? 'positive' : d < 0 ? 'negative' : ''}">${d > 0 ? '+' : ''}${d}</span></div>`).join('');
+  const families = `<p class="tiny">Villagers pair up and have children by themselves when the settlement is happy, well fed and has a spare bed. Children join the workforce after a day.</p>
+    <div class="stat-row r2"><span>Families</span><span>${s.families.length}</span></div><div class="stat-row r2"><span>Children growing up</span><span>${stats.children}</span></div>`;
+  return `${head('Villagers')}
+    <div class="strip"><span><b>${stats.pop}</b> villagers</span><span><b>${stats.employed}</b> working</span><span class="${stats.unemployed ? 'warning' : ''}"><b>${stats.unemployed}</b> unemployed</span><span>housing <b>${stats.pop}/${stats.housing}</b></span></div>
+    <div class="inline-actions"><button ${attribute('autohire', s.autoHire ? 'off' : 'on')} class="${s.autoHire ? 'important' : ''}">Auto-hire: ${s.autoHire ? 'ON' : 'OFF'}</button></div>
+    <p class="tiny dim">${s.autoHire ? 'Idle villagers take open job seats on their own, food first when stores run low.' : 'Auto-hire is off. Assign villagers yourself in the roster.'}${stats.unemployed ? ' Unemployed villagers need free seats: build or upgrade workplaces.' : ''}</p>
+    ${chips ? `<div class="chips">${chips}</div>` : ''}
+    ${drop('villagers:roster', `Roster <span class="dim">${stats.pop}</span>`, roster)}
+    ${drop('villagers:mood', `Mood <span class="dim">${pct(stats.happiness)}</span>`, `${mood}<p class="tiny dim">${game.timeInfo().activity} now. Routine: 06-08 breakfast, 08-17 work, 17-19 rest, 19-22 dinner, 22-06 sleep. Guards may take the night watch.</p>`)}
+    ${game.unlocked('villagerEvents') ? drop('villagers:families', 'Families', families) : ''}`;
 }
 
-function actionTab(tab, kicker, title, sub, extra = '') {
-  return `<div class="tab-kicker">${kicker}</div><h1 class="headline">${title}</h1><p class="subline">${sub}</p>${actionGrid(tab)}${extra}`;
-}
-
-function forestTab() {
-  return actionTab('Forest', 'Beyond the warm stones', 'Forest', 'The trees offer food and timber, but their quiet places are never empty.',
-    `<div class="section callout">Hunts can turn up fur, leather, bones and treasure maps. ${game.readyHero() ? 'Your hero may meet wild animals on a hunt.' : 'Without a hero, animals simply slip away.'}</div>`);
-}
-function mineTab() {
-  return actionTab('Mine', 'Dark and echoing', 'Mine', 'Iron lies behind the quarry wall. Take what the shaft will give.');
-}
+function actionTab(tab, title, sub, extra = '') { return `${head(title, sub)}${actionGrid(tab)}${extra}`; }
+function forestTab() { return actionTab('Forest', 'Forest', 'Food and timber, and quiet places that are never empty.'); }
+function mineTab() { return actionTab('Mine', 'Mine', 'Iron lies behind the quarry wall.'); }
 function caveTab() {
   const torch = RECIPES.find(r => r.id === 'torch');
-  return actionTab('Cave', 'The cold below', 'Cave', 'Deeper passages hold better rewards, relics and danger. Every descent burns a torch.',
-    `<div class="section two-col"><div class="card"><h3>Torches</h3><p>You have ${fmt(game.resource('torch'))}. Cave depth ${game.state.caveDepth}.</p><div class="cost">${cost(torch.cost)} → ${torch.result.torch} torches</div><button ${attribute('craft', 'torch')} ${game.canAfford(torch.cost) ? '' : 'disabled'}>Make torches</button></div>
-    <div><div class="section-title">Cave discoveries</div><ul class="mini-list"><li>${game.state.caveDepth >= 3 ? 'A sealed stairwell can be opened. Build a Dungeon Entrance.' : 'Keep exploring. Something sealed lies below.'}</li><li>Deep passages may hold relics, chambers, monsters and treasure.</li></ul></div></div>`);
+  return actionTab('Cave', 'Cave', 'Every descent burns a torch. Deeper means better rewards.',
+    `<div class="card-grid" style="margin-top:10px"><article class="card"><div class="card-head"><h3>Torches</h3><span class="pill">${fmt(game.resource('torch'))} held</span></div><div class="card-line">Depth ${game.state.caveDepth}</div>${buy('Make torches', `${cost(torch.cost)} → ${torch.result.torch}`, attribute('craft', 'torch'), game.canAfford(torch.cost))}</article></div>`);
 }
 
-function estateTab(stats) {
+function estateTab() {
   const list = availableBuildings(['Estate', 'Royal', 'Arcane']);
   const chain = ['ironIngot', 'steelBar', 'healingPotion', 'travelRations'].map(id => RECIPES.find(r => r.id === id)).filter(r => r && game.recipeVisible(r) && game.hasBuilding('workshop'));
-  return `<div class="tab-kicker">A growing realm</div><h1 class="headline">Estate</h1><p class="subline">Production chains make the settlement more than the sum of its hands.</p>
-    <div class="two-col">${chain.length ? `<div class="card"><h3>Production chains</h3><p>Iron + coal make steel; herbs + water make potions.</p><div class="inline-actions">${chain.map(r => `<button ${attribute('craft', r.id)} ${game.canAfford(r.cost) ? '' : 'disabled'} title="${esc(cost(r.cost))}">${r.name}</button>`).join('')}</div></div>` : ''}
-    ${game.unlocked('prestige') ? `<div class="card"><h3>Prestige: New Flame+</h3><p>At 45 building levels you may begin again. Keep a share of relics and gain Ember Shards, each worth +2% production. This is optional.</p><button class="important" ${attribute('prestige', 'now')} ${game.totalBuildingLevels() < 45 ? 'disabled' : ''}>Rekindle (${game.totalBuildingLevels()}/45)</button></div>` : ''}</div>
-    <div class="section"><div class="section-title">Estate & royal construction</div>${list.length ? `<div class="card-grid">${list.map(buildingCard).join('')}</div>` : '<div class="empty">Nothing new is within reach yet.</div>'}</div>`;
+  const prestige = game.unlocked('prestige') ? drop('estate:prestige', 'Prestige: New Flame+', `<p class="tiny">At 45 building levels you may begin again, keeping some relics and gaining Ember Shards (+2% production each). Optional.</p><button class="important" ${attribute('prestige', 'now')} ${game.totalBuildingLevels() < 45 ? 'disabled' : ''}>Rekindle (${game.totalBuildingLevels()}/45)</button>`) : '';
+  return `${head('Estate', 'Production chains and the grand works of a growing realm.')}
+    ${chain.length ? drop('estate:chain', 'Production chains', `<p class="tiny">Iron + coal make steel; herbs + water make potions.</p><div class="inline-actions">${chain.map(r => buy(r.name, cost(r.cost), attribute('craft', r.id), game.canAfford(r.cost))).join('')}</div>`) : ''}
+    ${prestige}
+    ${drop('estate:build', `Construction <span class="dim">${list.length}</span>`, list.length ? `<div class="card-grid">${list.map(buildingCard).join('')}</div>` : '<div class="empty">Nothing new is within reach yet.</div>', { open: true })}`;
 }
 
 function mapTab() {
@@ -252,104 +302,100 @@ function mapTab() {
   const hidden = REGIONS.length - regions.length;
   const hero = game.readyHero();
   const walker = hero ? hero.name : game.freeVillagers()[0]?.name;
-  return `<div class="tab-kicker">The wider world</div><h1 class="headline">Map</h1><p class="subline">Send a hero or a villager out. Expeditions take 1–10 minutes and return with finds.</p>
+  return `${head('Map', 'Send a hero or a villager out. Expeditions take 1–10 minutes.')}
   ${s.expeditions.length ? `<div class="callout good">${s.expeditions.map(e => { const r = REGIONS.find(x => x.id === e.regionId); return `${r.name} · ${time((e.endsAt - s.clock) * 1000)}`; }).join(' &nbsp;|&nbsp; ')}</div>` : ''}
   ${game.resource('maps') >= 1 ? `<div class="callout">You hold ${fmt(game.resource('maps'))} treasure map${game.resource('maps') >= 2 ? 's' : ''}. <button ${attribute('usemap', '1')}>Follow a map</button></div>` : ''}
   <div class="card-grid">${regions.map(region => {
     const full = s.expeditions.length >= game.maxParties();
-    return `<article class="card"><div class="card-row"><h3>${region.name}</h3><span class="pill">${Math.round(game.expeditionSeconds(region) / 6) / 10} min</span></div><p>${region.description}</p><div class="cost">Find: ${region.rewards.filter(id => game.isRevealed(id) || true).map(id => RESOURCE_BY_ID[id].name).join(', ')}<br>Threat: ${ENEMIES.find(e => e.id === region.enemy)?.name || 'Unknown'}</div><button ${attribute('expedition', region.id)} ${full || !walker ? 'disabled' : ''}>${full ? 'Parties away' : walker ? `Send ${esc(walker)}` : 'Nobody free'}</button></article>`;
+    return `<article class="card building"><div class="card-head"><h3>${region.name}</h3><span class="pill">${Math.round(game.expeditionSeconds(region) / 6) / 10} min</span></div>
+      <button class="buy" ${attribute('expedition', region.id)} ${full || !walker ? 'disabled' : ''}>${full ? 'Parties away' : walker ? `Send ${esc(walker)}` : 'Nobody free'}</button>
+      ${drop(`info:region:${region.id}`, 'Info', `<p>${region.description}</p><div class="tiny dim">Find: ${region.rewards.map(id => RESOURCE_BY_ID[id].name).join(', ')}<br>Threat: ${ENEMIES.find(e => e.id === region.enemy)?.name || 'Unknown'}</div>`, { cls: 'info' })}</article>`;
   }).join('')}</div>
   ${hidden ? `<div class="empty">${hidden} more region${hidden > 1 ? 's' : ''} lie beyond what the settlement can reach.</div>` : ''}
-  ${game.unlocked('worldBosses') ? `<div class="section"><div class="section-title">World bosses</div><div class="card-grid">${BOSSES.map(boss => `<article class="card"><h3>${boss.name}</h3><p>${boss.hp} health · ${boss.attack} attack · rare rewards</p><button ${attribute('boss', boss.id)} ${hero ? '' : 'disabled'}>Challenge</button></article>`).join('')}</div></div>` : ''}`;
+  ${game.unlocked('worldBosses') ? drop('map:bosses', 'World bosses', `<div class="card-grid">${BOSSES.map(boss => `<article class="card"><div class="card-head"><h3>${boss.name}</h3></div><div class="card-line">${boss.hp} health · ${boss.attack} attack</div><button class="buy" ${attribute('boss', boss.id)} ${hero ? '' : 'disabled'}>Challenge</button></article>`).join('')}</div>`) : ''}`;
+}
+
+function tradeTab() {
+  const s = game.state;
+  const sellable = TRADABLE.filter(id => game.isRevealed(id) && game.resource(id) >= 10).slice(0, 12);
+  return `${head('Trade', `The merchant’s stock changes in ${time((s.merchantRefresh - s.clock) * 1000)}.`)}
+    <div class="panel-box">${game.marketItems().map(item => `<div class="store-line"><span>${item.amount} ${RESOURCE_BY_ID[item.resource].name}</span>${buy('Buy', `${item.cost} ${RESOURCE_BY_ID[item.currency].name}`, attribute('buy', item.id), game.canAfford({ [item.currency]: item.cost }))}</div>`).join('') || '<div class="empty">Nothing on offer.</div>'}</div>
+    ${drop('trade:sell', 'Sell goods', sellable.length ? `<div class="inline-actions">${sellable.map(id => `<button ${attribute('sell', id)} title="Sell 10 for ${game.sellPrice(id, 10)} gold">${RESOURCE_BY_ID[id].name} <small>${game.sellPrice(id, 10)}g</small></button>`).join('')}</div><p class="tiny dim">Each button sells 10.</p>` : '<div class="empty">You have nothing worth selling yet.</div>', { open: true })}`;
 }
 
 function achievementsTab() {
-  const list = ACHIEVEMENTS.filter(a => game.achievementVisible(a));
-  return `<div class="tab-kicker">Records of the flame</div><h1 class="headline">Achievements</h1><p class="subline">${game.state.claimedAchievements.length}/${ACHIEVEMENTS.length} claimed. Every milestone returns supplies to the settlement.</p><div class="card-grid">${list.map(a => {
-    const current = game.achievementProgress(a);
+  const s = game.state;
+  const pending = ACHIEVEMENTS.filter(a => game.achievementVisible(a) && !s.claimedAchievements.includes(a.id))
+    .map(a => ({ a, current: game.achievementProgress(a) }))
+    .sort((x, y) => (y.current >= y.a.target) - (x.current >= x.a.target) || y.current / y.a.target - x.current / x.a.target);
+  const shown = pending.slice(0, 8);
+  return `${head('Achievements', `${s.claimedAchievements.length}/${ACHIEVEMENTS.length} claimed. Finished ones disappear.`)}
+  <div class="card-grid">${shown.map(({ a, current }) => {
     const ready = current >= a.target;
-    const was = game.state.claimedAchievements.includes(a.id);
-    return `<article class="card"><h3>${a.name} ${was ? '<span class="positive">✓</span>' : ''}</h3><p>${a.description}</p><div class="cost">${a.kind}: ${fmt(Math.min(current, a.target))}/${a.target} · reward ${cost(Object.fromEntries(Object.entries(a.reward).filter(([, n]) => n > 0)))}</div>${progress(current, a.target)}<button ${attribute('achievement', a.id)} ${!ready || was ? 'disabled' : ''}>${was ? 'Claimed' : ready ? 'Claim reward' : 'In progress'}</button></article>`;
-  }).join('')}</div>`;
+    return `<article class="card"><div class="card-head"><h3>${a.name}</h3><span class="pill">${fmt(Math.min(current, a.target))}/${a.target}</span></div>${progress(current, a.target)}<div class="tiny dim">${a.description}</div>${buy(ready ? 'Claim' : 'In progress', cost(Object.fromEntries(Object.entries(a.reward).filter(([, n]) => n > 0))), attribute('achievement', a.id), ready)}</article>`;
+  }).join('') || '<div class="empty">Nothing left to claim for now.</div>'}</div>
+  ${pending.length > shown.length ? `<div class="empty">${pending.length - shown.length} more are still out of sight.</div>` : ''}`;
 }
 
 function eventsTab() {
-  return `<div class="tab-kicker">Things that happen in the dark</div><h1 class="headline">Events</h1><p class="subline">Most changes help the settlement. Expect one every three to five minutes.</p>
-  <div class="section"><div class="section-title">Recent events</div><ul class="mini-list">${game.state.logs.slice(0, 50).map(item => `<li><span class="dim">${clockTime(item.at)}</span> ${esc(item.text)}</li>`).join('')}</ul></div>`;
-}
-
-function eventCard(e) {
-  const labels = { story_traveller: ['Welcome', 'Turn away'], story_merchant: ['Greet them', 'Send away'], traveller: ['Welcome', 'Decline'], merchant: ['Accept gift', 'Decline'], festival: ['Hold festival', 'Skip'], chest: ['Open chest', 'Leave it'], threat: ['Defend', 'Stay inside'] };
-  const [yes, no] = labels[e.kind] || ['Accept', 'Decline'];
-  return `<div class="callout fire event-card"><h3 class="headline">${esc(e.title)}</h3><p>${esc(e.body)}</p><div class="inline-actions"><button class="important" ${attribute('event', 'accept')}>${yes}</button><button ${attribute('event', 'decline')}>${no}</button></div></div>`;
+  return `${head('Events')}${drop('events:list', 'Recent events', `<ul class="mini-list">${game.state.logs.slice(0, 50).map(item => `<li><span class="dim">${clockTime(item.at)}</span> ${esc(item.text)}</li>`).join('')}</ul>`, { open: true })}`;
 }
 
 function dungeonTab() {
   const d = game.state.dungeon;
-  return `<div class="tab-kicker">A cold stair beneath the settlement</div><h1 class="headline">Dungeon</h1><p class="subline">Floors hold enemies, hidden rooms, mini-bosses and rare rewards. Heroes recover after defeat; no one is lost.</p>
-  ${d ? `<div class="callout fire"><h3 class="headline">Floor ${d.floor}</h3><p>You hear something moving ahead. ${d.cleared}/${d.rooms} rooms searched, ${d.treasure} treasures found.</p><div class="inline-actions"><button class="important" ${attribute('dungeon', 'continue')}>Continue</button><button ${attribute('dungeon', 'retreat')}>Retreat</button></div></div>` : `<div class="card"><h3>Forgotten dungeon</h3><p>Bring torches${game.readyHero() ? '' : ' and a ready hero (without one the party only searches rooms)'}.</p><button ${attribute('dungeon', 'start')} ${game.resource('torch') ? '' : 'disabled'}>Descend</button></div>`}
-  <div class="section"><div class="section-title">Prepared supplies</div><div class="stat-row"><span>Torches</span><span>${fmt(game.resource('torch'))}</span><span class="dim">one per room</span></div><div class="stat-row"><span>Ready heroes</span><span>${game.state.heroes.filter(h => !h.recovering).length}</span><span class="dim">fighters</span></div></div>`;
+  return `${head('Dungeon', 'Heroes recover after defeat; no one is lost.')}
+  ${d ? `<div class="callout fire"><h3 class="headline">Floor ${d.floor}</h3><p>You hear something moving ahead. ${d.cleared}/${d.rooms} rooms searched, ${d.treasure} treasures found.</p><div class="inline-actions"><button class="important" ${attribute('dungeon', 'continue')}>Continue</button><button ${attribute('dungeon', 'retreat')}>Retreat</button></div></div>` : `<div class="card-grid"><article class="card building"><div class="card-head"><h3>Forgotten dungeon</h3></div><div class="card-line">${fmt(game.resource('torch'))} torches · ${game.state.heroes.filter(h => !h.recovering).length} ready heroes</div><button class="buy" ${attribute('dungeon', 'start')} ${game.resource('torch') ? '' : 'disabled'}>Descend</button></article></div>`}`;
 }
 
 function researchTab() {
-  return `<div class="tab-kicker">What the old world knew</div><h1 class="headline">Research</h1><p class="subline">Affordable theory unlocks a faster, broader settlement. Researchers and libraries generate research points.</p><div class="card-grid">${Object.entries(RESEARCH).map(([branch, nodes]) => {
+  return `${head('Research', 'Researchers and libraries generate research points.')}<div class="card-grid">${Object.entries(RESEARCH).map(([branch, nodes]) => {
     const level = game.state.research[branch];
-    const next = nodes[level];
     const max = level >= nodes.length;
     const c = game.researchCost(level);
-    return `<article class="card"><h3>${branch[0].toUpperCase() + branch.slice(1)} <span class="dim">${level}/${nodes.length}</span></h3><p>${nodes.map((node, i) => `${i < level ? '✓ ' : i === level ? '→ ' : '· '}${node}`).join('<br>')}</p><div class="cost">${max ? 'The branch is complete.' : `Next: ${next}<br>${cost(c)}`}</div>${progress(level, nodes.length)}<button ${attribute('research', branch)} ${max || !game.canAfford(c) ? 'disabled' : ''}>${max ? 'Complete' : 'Study next theory'}</button></article>`;
-  }).join('')}</div><p class="tiny dim">Agriculture: +4% food per level. Construction: −2% build costs and +1% arrivals. Military: +2 combat. Economy: +4% sale prices. Magic: +3% research speed.</p>`;
+    return `<article class="card building"><div class="card-head"><h3>${branch[0].toUpperCase() + branch.slice(1)}</h3><span class="pill">${level}/${nodes.length}</span></div>${progress(level, nodes.length)}<div class="card-line">${max ? 'Complete' : `Next: ${nodes[level]}`}</div>${max ? '' : buy('Study', cost(c), attribute('research', branch), game.canAfford(c))}
+      ${drop(`info:research:${branch}`, 'Info', nodes.map((n, i) => `<div class="tiny ${i < level ? 'positive' : 'dim'}">${i < level ? '✓' : '·'} ${n}</div>`).join(''), { cls: 'info' })}</article>`;
+  }).join('')}</div>`;
 }
 
 function craftingTab() {
   const visible = RECIPES.filter(r => game.recipeVisible(r));
   const categories = [...new Set(visible.map(r => r.category))];
   const hiddenCount = RECIPES.length - visible.length;
-  return `<div class="tab-kicker">Make the ordinary useful</div><h1 class="headline">Crafting</h1><p class="subline">${visible.length} recipes known. Research and new discoveries reveal more.</p>
-  ${categories.map(category => `<div class="section"><div class="section-title">${category}</div><div class="card-grid">${visible.filter(r => r.category === category).map(recipe => `<article class="card"><h3>${recipe.name}</h3><p>${recipe.result.equipment ? `${recipe.result.equipment}; rarity is rolled when made.` : Object.entries(recipe.result).map(([id, n]) => `+${n} ${RESOURCE_BY_ID[id]?.name}`).join(', ')}</p><div class="cost">${cost(recipe.cost)}</div><button ${attribute('craft', recipe.id)} ${game.canAfford(recipe.cost) ? '' : 'disabled'}>Craft</button></article>`).join('')}</div></div>`).join('')}
+  return `${head('Crafting', `${visible.length} recipes known. Research reveals more.`)}
+  ${categories.map((category, i) => drop(`craft:${category}`, `${category} <span class="dim">${visible.filter(r => r.category === category).length}</span>`, `<div class="card-grid">${visible.filter(r => r.category === category).map(recipe => `<article class="card"><div class="card-head"><h3>${recipe.name}</h3></div><div class="card-line">${recipe.result.equipment ? recipe.result.equipment : Object.entries(recipe.result).map(([id, n]) => `+${n} ${RESOURCE_BY_ID[id]?.name}`).join(', ')}</div>${buy('Craft', cost(recipe.cost), attribute('craft', recipe.id), game.canAfford(recipe.cost))}</article>`).join('')}</div>`, { open: i === 0 })).join('')}
   ${hiddenCount ? `<div class="empty">${hiddenCount} more recipes are still unknown.</div>` : ''}`;
 }
 
 function heroesTab() {
   const s = game.state;
   const c = game.heroCost();
-  return `<div class="tab-kicker">Those who walk into danger</div><h1 class="headline">Heroes</h1><p class="subline">Automatic text combat lets heroes gain levels, carry equipment and recover after a defeat.</p><div class="callout">${s.heroes.length ? `${s.heroes.length} hero${s.heroes.length > 1 ? 'es follow' : ' follows'} the ember.` : 'No hero has yet come to the settlement.'} <button ${attribute('hero', 'recruit')} ${game.canAfford(c) ? '' : 'disabled'}>Recruit a hero (${cost(c)})</button></div>
-  <div class="card-grid">${s.heroes.map(hero => `<article class="card"><div class="card-row"><h3>${esc(hero.name)} <span class="pill ${hero.rarity.toLowerCase()}">${hero.rarity}</span></h3><button ${attribute('selecthero', hero.id)} ${s.selectedHero === hero.id ? 'disabled' : ''}>${s.selectedHero === hero.id ? 'Selected' : 'Select'}</button></div><p>Level ${hero.level} ${hero.class} · ${hero.recovering ? `recovering ${time((hero.recovering - s.clock) * 1000)}` : 'ready'}</p>${progress(hero.health, hero.maxHealth, 'hero-health')}<div class="stat-row"><span>${Math.ceil(hero.health)}/${hero.maxHealth} health</span><span>${hero.attack} atk</span><span>${hero.defence} def</span></div><p class="tiny">Experience ${hero.experience} · speed ${hero.speed}</p></article>`).join('')}</div>
-  ${s.equipment.length ? `<div class="section"><div class="section-title">Equipment store</div><ul class="mini-list">${s.equipment.map((item, index) => `<li>${esc(item.name)} <span class="pill ${item.rarity.toLowerCase()}">${item.rarity}</span> <span class="dim">Lv ${item.level || 1}/10</span> <button ${attribute('equipment', index)} ${(item.level || 1) >= 10 ? 'disabled' : ''}>Improve</button></li>`).join('')}</ul></div>` : ''}`;
+  return `${head('Heroes', 'Automatic text combat. Heroes level up and recover after a defeat.')}
+  <div class="inline-actions">${buy('Recruit a hero', cost(c), attribute('hero', 'recruit'), game.canAfford(c))}</div>
+  <div class="card-grid" style="margin-top:8px">${s.heroes.map(hero => `<article class="card building"><div class="card-head"><h3>${esc(hero.name)}</h3><span class="pill ${hero.rarity.toLowerCase()}">${hero.rarity}</span></div><div class="card-line">Lv ${hero.level} ${hero.class} · ${hero.recovering ? `recovering ${time((hero.recovering - s.clock) * 1000)}` : 'ready'}</div>${progress(hero.health, hero.maxHealth, 'hero-health')}<button class="buy" ${attribute('selecthero', hero.id)} ${s.selectedHero === hero.id ? 'disabled' : ''}>${s.selectedHero === hero.id ? 'Selected' : 'Select'}</button>${drop(`info:hero:${hero.id}`, 'Stats', `<div class="tiny dim">${Math.ceil(hero.health)}/${hero.maxHealth} health · ${hero.attack} attack · ${hero.defence} defence · speed ${hero.speed}<br>Experience ${hero.experience}</div>`, { cls: 'info' })}</article>`).join('') || '<div class="empty">No hero has yet come to the settlement.</div>'}</div>
+  ${s.equipment.length ? drop('heroes:gear', `Equipment <span class="dim">${s.equipment.length}</span>`, `<ul class="mini-list">${s.equipment.map((item, index) => `<li>${esc(item.name)} <span class="pill ${item.rarity.toLowerCase()}">${item.rarity}</span> <span class="dim">Lv ${item.level || 1}/10</span> <button ${attribute('equipment', index)} ${(item.level || 1) >= 10 ? 'disabled' : ''}>Improve</button></li>`).join('')}</ul>`) : ''}`;
 }
 
 function petsTab() {
   const s = game.state;
-  const pets = game.unlocked('animalTracks') ? `<div class="section"><div class="section-title">Pets ${s.pets.length}/${PETS.length}</div><div class="card-grid">${PETS.map(pet => {
+  const pets = game.unlocked('animalTracks') ? drop('pets:pets', `Pets <span class="dim">${s.pets.length}/${PETS.length}</span>`, `<div class="card-grid">${PETS.map(pet => {
     const owned = s.pets.includes(pet.id);
     const level = s.petLevels[pet.id] || 1;
-    return `<article class="card"><h3>${pet.name} ${owned ? '<span class="positive">✓</span>' : ''}</h3><p>${pet.bonus}${owned ? ` · level ${level}/10` : ''}</p><button ${attribute('pet', pet.id)} ${owned || !game.canAfford({ gold: 30, food: 20 }) ? 'disabled' : ''}>${owned ? 'At the fire' : 'Foster (30 Gold, 20 Food)'}</button>${owned ? ` <button ${attribute('feedpet', pet.id)} ${level >= 10 ? 'disabled' : ''}>Train</button>` : ''}</article>`;
-  }).join('')}</div></div>` : '';
-  const mounts = game.hasBuilding('stable') ? `<div class="section"><div class="section-title">Mounts ${s.mounts.length}/${MOUNTS.length}</div><div class="card-grid">${MOUNTS.map(mount => { const owned = s.mounts.includes(mount.id); return `<article class="card"><h3>${mount.name} ${owned ? '<span class="positive">✓</span>' : ''}</h3><p>${mount.bonus}</p><button ${attribute('mount', mount.id)} ${owned || !game.canAfford({ gold: 110, leather: 12, food: 30 }) ? 'disabled' : ''}>${owned ? 'Trained' : 'Acquire (110 Gold, 12 Leather, 30 Food)'}</button></article>`; }).join('')}</div></div>` : '';
-  const monsters = game.hasBuilding('monsterSanctuary') ? `<div class="section"><div class="section-title">Monster sanctuary</div>${s.monsters.length ? `<ul class="mini-list">${s.monsters.map(m => `<li>${esc(typeof m === 'string' ? m : m.name)} <span class="dim">${typeof m === 'string' ? 'settled safely' : m.bonus}</span></li>`).join('')}</ul>` : '<div class="empty">Defeated creatures can sometimes be calmed rather than driven away.</div>'}</div>` : '';
-  return `<div class="tab-kicker">Creatures of the settlement</div><h1 class="headline">Companions</h1><p class="subline">Their quiet bonuses stack.</p>${pets}${mounts}${monsters}`;
+    return `<article class="card"><div class="card-head"><h3>${pet.name}</h3><span class="pill">${owned ? `Lv ${level}/10` : 'wild'}</span></div><div class="card-line">${pet.bonus}</div>${owned ? buy('Train', cost({ food: 8 + level * 2, herbs: 1 }), attribute('feedpet', pet.id), level < 10) : buy('Foster', '30 Gold, 20 Food', attribute('pet', pet.id), game.canAfford({ gold: 30, food: 20 }))}</article>`;
+  }).join('')}</div>`, { open: true }) : '';
+  const mounts = game.hasBuilding('stable') ? drop('pets:mounts', `Mounts <span class="dim">${s.mounts.length}/${MOUNTS.length}</span>`, `<div class="card-grid">${MOUNTS.map(mount => { const owned = s.mounts.includes(mount.id); return `<article class="card"><div class="card-head"><h3>${mount.name}</h3><span class="pill">${owned ? 'trained' : 'wild'}</span></div><div class="card-line">${mount.bonus}</div>${owned ? '' : buy('Acquire', '110 Gold, 12 Leather, 30 Food', attribute('mount', mount.id), game.canAfford({ gold: 110, leather: 12, food: 30 }))}</article>`; }).join('')}</div>`) : '';
+  const monsters = game.hasBuilding('monsterSanctuary') ? drop('pets:monsters', 'Monster sanctuary', s.monsters.length ? `<ul class="mini-list">${s.monsters.map(m => `<li>${esc(typeof m === 'string' ? m : m.name)} <span class="dim">${typeof m === 'string' ? 'settled safely' : m.bonus}</span></li>`).join('')}</ul>` : '<div class="empty">Defeated creatures can sometimes be calmed rather than driven away.</div>') : '';
+  return `${head('Companions', 'Their quiet bonuses stack.')}${pets}${mounts}${monsters}`;
 }
 
 function questsTab() {
-  const list = QUESTS.filter(q => game.questVisible(q));
-  return `<div class="tab-kicker">Small promises, lasting change</div><h1 class="headline">Quests</h1><p class="subline">Goals that keep the next reward close.</p><div class="card-grid">${list.map(q => {
+  const list = QUESTS.filter(q => game.questVisible(q) && !game.state.quests[q.id]);
+  return `${head('Quests', 'Finished quests disappear.')}<div class="card-grid">${list.map(q => {
     const current = game.progressQuest(q);
-    const done = game.state.quests[q.id];
-    const ready = current >= q.target;
-    return `<article class="card"><div class="card-row"><h3>${q.name}</h3><span class="pill">${q.type}</span></div><p>${q.text}</p><div class="cost">${fmt(Math.min(current, q.target))}/${q.target} · reward ${cost(q.reward)}</div>${progress(current, q.target)}<button ${attribute('quest', q.id)} ${!ready || done ? 'disabled' : ''}>${done ? 'Completed' : ready ? 'Claim reward' : 'In progress'}</button></article>`;
-  }).join('')}</div>`;
+    return `<article class="card"><div class="card-head"><h3>${q.name}</h3><span class="pill">${fmt(Math.min(current, q.target))}/${q.target}</span></div>${progress(current, q.target)}<div class="tiny dim">${q.text}</div>${buy(current >= q.target ? 'Claim' : 'In progress', cost(q.reward), attribute('quest', q.id), current >= q.target)}</article>`;
+  }).join('') || '<div class="empty">No quests right now.</div>'}</div>`;
 }
 
-const TAB_RENDERERS = { Camp: campTab, Village: villageTab, Villagers: villagersTab, Forest: forestTab, Mine: mineTab, Cave: caveTab, Estate: estateTab, Map: mapTab, Crafting: craftingTab, Dungeon: dungeonTab, Research: researchTab, Heroes: heroesTab, Pets: petsTab, Quests: questsTab, Achievements: achievementsTab, Events: eventsTab };
-
-function baseView() {
-  const campfire = BUILDINGS.find(b => b.id === 'campfire');
-  const intro = game.state.tracking.actions < 3
-    ? 'You stand alone at the edge of the dark. Cold air, the sound of leaves, and trees close at hand. A fire would change everything, and a fire needs wood.'
-    : game.buildingAvailable(campfire) ? 'You have enough wood to make a fire.' : 'The wood pile grows. Keep going.';
-  return `<div class="tab-kicker">Beginning</div><h1 class="headline">EMBERFALL</h1><p class="subline">${intro}</p>${actionGrid('Camp')}
-    ${game.buildingAvailable(campfire) && !game.hasBuilding('campfire') ? `<div class="section"><div class="section-title">Build</div><div class="card-grid">${buildingCard(campfire)}</div></div>` : ''}`;
-}
+const TAB_RENDERERS = { Main: mainTab, Village: villageTab, Villagers: villagersTab, Stores: storesTab, Forest: forestTab, Mine: mineTab, Cave: caveTab, Estate: estateTab, Map: mapTab, Trade: tradeTab, Crafting: craftingTab, Dungeon: dungeonTab, Research: researchTab, Heroes: heroesTab, Pets: petsTab, Quests: questsTab, Achievements: achievementsTab, Events: eventsTab };
 
 function content(stats) {
   // "Main" is always there so the player can return from any tab. The nav bar only appears
@@ -359,30 +405,28 @@ function content(stats) {
   if (game.state.selectedTab === 'Camp' || !tabs.some(t => t.id === game.state.selectedTab)) game.state.selectedTab = 'Main';
   const current = game.state.selectedTab;
   const nav = tabs.length > 1 ? `<nav class="nav">${tabs.map(t => `<button ${attribute('tab', t.id)} class="${current === t.id ? 'active' : ''}">${t.id}</button>`).join('')}</nav>` : '';
-  const body = current === 'Main' ? (game.unlocked('camp') ? campTab(stats) : baseView()) : TAB_RENDERERS[current](stats);
-  return { nav, body };
+  return { nav, body: TAB_RENDERERS[current](stats) };
 }
 
 // ---------------------------------------------------------------------------------------------
-// Right column and log
+// Header, settings, log, dialogs
 // ---------------------------------------------------------------------------------------------
-function contextPanel() {
-  const s = game.state;
-  const sections = [];
-  if (game.unlocked('trading')) {
-    const sellable = TRADABLE.filter(id => game.isRevealed(id) && game.resource(id) >= 10).slice(0, 8);
-    sections.push(`<div class="section"><div class="section-title">Travelling merchant</div><p class="tiny muted">Stock changes in ${time((s.merchantRefresh - s.clock) * 1000)}.</p>${game.marketItems().map(item => `<div class="card-row" style="margin:5px 0"><span>${item.amount} ${RESOURCE_BY_ID[item.resource].name}</span><button ${attribute('buy', item.id)} ${game.canAfford({ [item.currency]: item.cost }) ? '' : 'disabled'}>${item.cost} ${RESOURCE_BY_ID[item.currency].name}</button></div>`).join('') || '<div class="empty">Nothing on offer.</div>'}
-      ${sellable.length ? `<div class="section-title" style="margin-top:8px">Sell 10</div><div class="inline-actions">${sellable.map(id => `<button ${attribute('sell', id)} title="${game.sellPrice(id, 10)} gold">${RESOURCE_BY_ID[id].name}</button>`).join('')}</div>` : ''}</div>`);
-  }
-  if (game.unlocked('map') && s.expeditions.length) {
-    sections.push(`<div class="section"><div class="section-title">Active expeditions</div>${s.expeditions.map(e => { const r = REGIONS.find(x => x.id === e.regionId); return `<ul class="mini-list"><li>${r.name}<br><span class="dim">returns in ${time((e.endsAt - s.clock) * 1000)}</span></li></ul>`; }).join('')}</div>`);
-  }
-  return sections.length ? `<aside class="context">${sections.join('')}</aside>` : '';
+function eventCard(e) {
+  const labels = { story_traveller: ['Welcome', 'Turn away'], story_merchant: ['Greet them', 'Send away'], traveller: ['Welcome', 'Decline'], merchant: ['Accept gift', 'Decline'], festival: ['Hold festival', 'Skip'], chest: ['Open chest', 'Leave it'], threat: ['Defend', 'Stay inside'] };
+  const [yes, no] = labels[e.kind] || ['Accept', 'Decline'];
+  return `<div class="callout fire event-card"><h3 class="headline">${esc(e.title)}</h3><p>${esc(e.body)}</p><div class="inline-actions"><button class="important" ${attribute('event', 'accept')}>${yes}</button><button ${attribute('event', 'decline')}>${no}</button></div></div>`;
+}
+
+function settingsMenu() {
+  const body = `<div class="text-size"><span class="dim">Text size</span><button ${attribute('ui', 'down')} ${uiScale <= UI_MIN ? 'disabled' : ''} aria-label="Smaller text">A−</button><span class="size-value">${uiScale}%</span><button ${attribute('ui', 'up')} ${uiScale >= UI_MAX ? 'disabled' : ''} aria-label="Larger text">A+</button>${uiScale !== 100 ? `<button ${attribute('ui', 'reset')}>Reset</button>` : ''}</div>
+    <div class="inline-actions"><button ${attribute('manage', 'save')}>Save</button><button ${attribute('manage', 'export')}>Export</button><button ${attribute('manage', 'import')}>Import</button><button class="danger" ${attribute('manage', 'reset')}>Reset game</button></div>`;
+  return `<details class="drop settings" data-panel="settings" ${isOpen('settings') ? 'open' : ''}><summary>Settings</summary><div class="pop">${body}</div></details>`;
 }
 
 function logPanel() {
-  const s = game.state;
-  return `<section class="log-panel"><div class="log-head"><div class="section-title">Event log <span class="dim">latest ${s.logs.length}/50</span></div><div class="footer-controls"><button ${attribute('manage', 'save')}>Save</button><button ${attribute('manage', 'export')}>Export</button><button ${attribute('manage', 'import')}>Import</button><button class="danger" ${attribute('manage', 'reset')}>Reset</button></div></div>${s.logs.slice(0, 12).map(item => `<div class="log-entry"><span class="log-time">${clockTime(item.at)}</span><span>${esc(item.text)}</span></div>`).join('')}</section>`;
+  const logs = game.state.logs;
+  const latest = logs[0];
+  return `<details class="drop log-panel" data-panel="log" ${isOpen('log') ? 'open' : ''}><summary><span class="section-title">Log</span> <span class="log-latest">${latest ? esc(latest.text) : ''}</span></summary><div class="log-body">${logs.slice(0, 20).map(item => `<div class="log-entry"><span class="log-time">${clockTime(item.at)}</span><span>${esc(item.text)}</span></div>`).join('')}</div></details>`;
 }
 
 function offlineReportMarkup(r) {
@@ -393,7 +437,7 @@ function offlineReportMarkup(r) {
   return `<div class="modal-layer"><div class="modal"><h2 class="headline">Welcome back</h2><p class="subline">While you were away${r.capped ? ' (the first 8 hours count)' : ''}: ${r.minutes} minutes.</p>
     ${gains.length ? `<ul class="mini-list">${gains.map(x => `<li class="positive">+${x}</li>`).join('')}</ul>` : '<p class="dim">Nothing was gathered.</p>'}
     ${losses.length ? `<p class="tiny dim">Used: ${losses.join(', ')}</p>` : ''}
-    ${wasted.length ? `<p class="notice">Storage was full. Lost: ${wasted.join(', ')}.</p>` : ''}
+    ${wasted.length ? `<p class="notice">A store was full. Lost: ${wasted.join(', ')}.</p>` : ''}
     ${r.arrivals ? `<p>${r.arrivals} new villager${r.arrivals > 1 ? 's' : ''} arrived.</p>` : ''}${r.expeditions > 0 ? `<p>${r.expeditions} expedition${r.expeditions > 1 ? 's' : ''} completed.</p>` : ''}${r.merchants ? `<p>${r.merchants} merchant visit${r.merchants > 1 ? 's' : ''}.</p>` : ''}${r.left ? `<p class="negative">${r.left} villager${r.left > 1 ? 's' : ''} left hungry.</p>` : ''}
     <div class="inline-actions"><button class="important" ${attribute('modal', 'dismiss-offline')}>Continue</button></div></div></div>`;
 }
@@ -409,9 +453,9 @@ function modalMarkup() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Rendering
+// Rendering and input
 // ---------------------------------------------------------------------------------------------
-const SCROLLERS = ['.sidebar', '.tab-content', '.context', '.log-panel', '.modal'];
+const SCROLLERS = ['.sidebar', '.tab-content', '.log-body', '.modal'];
 
 function render() {
   const active = document.activeElement;
@@ -422,13 +466,20 @@ function render() {
   const { nav, body } = content(stats);
   const info = game.timeInfo();
   const pending = game.state.pendingEvent ? eventCard(game.state.pendingEvent) : '';
-  const context = contextPanel();
-  root.innerHTML = `<div class="game-shell"><header class="masthead"><div><span class="logo">EMBERFALL</span> <span class="tagline">a settlement in the dark</span></div><div class="masthead-right"><div class="text-size" title="Text size"><span class="dim">Text</span><button ${attribute('ui', 'down')} ${uiScale <= UI_MIN ? 'disabled' : ''} aria-label="Smaller text">A\u2212</button><span class="size-value">${uiScale}%</span><button ${attribute('ui', 'up')} ${uiScale >= UI_MAX ? 'disabled' : ''} aria-label="Larger text">A+</button>${uiScale !== 100 ? `<button ${attribute('ui', 'reset')}>Reset</button>` : ''}</div>${game.unlocked('camp') ? `<div class="clock">Day ${info.day} · ${info.time} · ${info.daytime ? 'day' : 'night'} · ${info.season} · ${info.weather}</div>` : ''}</div></header>
-    <div class="layout ${context ? '' : 'no-context'}">${sidebar(stats)}<main class="main">${nav}<section class="tab-content">${pending}${body}</section></main>${context}</div>${logPanel()}</div>${modalMarkup()}`;
+  root.innerHTML = `<div class="game-shell"><header class="masthead"><div><span class="logo">EMBERFALL</span> <span class="tagline">a settlement in the dark</span></div>
+    <div class="masthead-right">${game.unlocked('camp') ? `<div class="clock">Day ${info.day} · ${info.time} · ${info.daytime ? 'day' : 'night'} · ${info.season} · ${info.weather}</div>` : ''}${settingsMenu()}</div></header>
+    <div class="layout">${sidebar(stats)}<main class="main">${nav}<section class="tab-content">${pending}${body}</section></main></div>${logPanel()}</div>${modalMarkup()}`;
   SCROLLERS.forEach((sel, i) => { const el = root.querySelector(sel); if (el) el.scrollTop = saved[i]; });
 }
 
 root.addEventListener('click', event => {
+  // Dropdowns are toggled here (not natively) so the open state survives the once-a-second redraw.
+  const summary = event.target.closest('summary');
+  if (summary) {
+    const details = summary.parentElement;
+    if (details?.dataset?.panel) { event.preventDefault(); panels[details.dataset.panel] = !details.open; savePanels(); render(); }
+    return;
+  }
   const button = event.target.closest('button');
   if (!button || button.disabled) return;
   const data = button.dataset;
@@ -452,9 +503,7 @@ root.addEventListener('click', event => {
   else if (data.mount) game.acquireMount(data.mount);
   else if (data.equipment) game.upgradeEquipment(Number(data.equipment));
   else if (data.quest) game.claimQuest(data.quest);
-  else if (data.family === 'join') game.joinFamily();
-  else if (data.family === 'grow') game.growChildren();
-  else if (data.child) game.welcomeChild(data.child);
+  else if (data.autohire) game.setAutoHire(data.autohire === 'on');
   else if (data.buy) game.buyMerchant(data.buy);
   else if (data.sell) game.sell(data.sell);
   else if (data.dungeon === 'start') game.startDungeon();

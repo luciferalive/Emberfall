@@ -5,7 +5,21 @@ export const HOUSING_TABLE = [2, 4, 6, 8, 12, 16, 20, 26, 32, 40];
 export const STORAGE_TABLE = [500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000];
 export const WAREHOUSE_TABLE = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400, 204800, 409600];
 export const CASTLE_HOUSING_TABLE = [10, 14, 18, 22, 26, 30, 34, 40, 46, 52];
-export const BASE_STORAGE = 150; // open-air stockpile before any Storage is built
+export const BASE_STORAGE = 150; // open-air stockpile per storage class before any store is built
+
+// Bulk goods are kept in specialised stores. Anything not listed here (gold, silver, gems,
+// crystal, ancient coins, torches, potions, research and other special items) is NOT stored
+// in a building and has no limit.
+export const STORAGE_CLASSES = {
+  lumber: { name: 'Lumber Yard', items: ['wood'] },
+  stone: { name: 'Stoneyard', items: ['stone'] },
+  food: { name: 'Granary', items: ['food', 'meat', 'seeds', 'herbs', 'water'] },
+  coal: { name: 'Coal Shed', items: ['coal'] },
+  ore: { name: 'Ore Depot', items: ['iron', 'steel', 'sulfur'] },
+  hides: { name: 'Hide Store', items: ['fur', 'leather', 'bones', 'silk'] }
+};
+export const CLASS_OF = {};
+for (const [cls, info] of Object.entries(STORAGE_CLASSES)) for (const id of info.items) CLASS_OF[id] = cls;
 
 // Professions --------------------------------------------------------------------------------
 // production is per WORKING hour. `requires` lists buildings whose levels provide job slots
@@ -42,7 +56,7 @@ export const PROFESSION_BY_ID = Object.fromEntries(PROFESSIONS.map(p => [p.id, p
 const def = (id, name, tier, cost, description, o = {}) => ({
   id, name, tier, cost, description,
   effect: o.effect || {}, passive: o.passive || {}, allDay: !!o.allDay,
-  max: o.max || 1, capKey: o.capKey || null, capTable: o.capTable || null,
+  max: o.max || 1, capKey: o.capKey || null, capTable: o.capTable || null, capClass: o.capClass || null,
   requires: o.requires || []
 });
 
@@ -50,7 +64,13 @@ export const BUILDINGS = [
   // Basic
   def('campfire', 'Campfire', 'Basic', { wood: 50 }, 'The first claim against the dark. Warmth lifts spirits.', { effect: { happiness: 2 }, requires: [L('wood', 50)] }),
   def('smallHouse', 'Small Hut', 'Basic', { wood: 50, stone: 20 }, 'Shelter for villagers. Capacity rises with each upgrade.', { capKey: 'housing', capTable: HOUSING_TABLE, max: 12, requires: [L('wood', 100), L('stone', 50)] }),
-  def('storage', 'Storage', 'Basic', { wood: 40 }, 'Raises how much of every resource you can keep.', { capKey: 'storage', capTable: STORAGE_TABLE, max: 4, requires: [L('wood', 80)] }),
+  // Stores (shown on the Stores tab)
+  def('lumberYard', 'Lumber Yard', 'Storage', { wood: 40 }, 'Keeps cut timber dry. Raises how much wood you can hold.', { capKey: 'storage', capTable: STORAGE_TABLE, max: 3, capClass: 'lumber', requires: [L('wood', 80)] }),
+  def('stoneyard', 'Stoneyard', 'Storage', { wood: 40, stone: 20 }, 'Racks and pits for quarried stone. Raises the stone limit.', { capKey: 'storage', capTable: STORAGE_TABLE, max: 3, capClass: 'stone', requires: [L('stone', 60)] }),
+  def('granary', 'Granary', 'Storage', { wood: 50, stone: 10 }, 'Cool, dry bins for food, meat, seeds, herbs and water.', { capKey: 'storage', capTable: STORAGE_TABLE, max: 3, capClass: 'food', requires: [L('food', 50)] }),
+  def('coalStore', 'Coal Shed', 'Storage', { wood: 60, stone: 30 }, 'A roofed shed so the coal stays dry and safe.', { capKey: 'storage', capTable: STORAGE_TABLE, max: 3, capClass: 'coal', requires: [U('coal')] }),
+  def('oreDepot', 'Ore Depot', 'Storage', { wood: 60, stone: 40 }, 'Bins for iron, steel and sulfur.', { capKey: 'storage', capTable: STORAGE_TABLE, max: 3, capClass: 'ore', requires: [L('iron', 10)] }),
+  def('hideStore', 'Hide Store', 'Storage', { wood: 50, stone: 20 }, 'Hooks and racks for fur, leather, bones and silk.', { capKey: 'storage', capTable: STORAGE_TABLE, max: 3, capClass: 'hides', requires: [L('fur', 5)] }),
   def('woodcutterHut', 'Woodcutter Hut', 'Basic', { wood: 60, stone: 20 }, 'Automates timber. Trickles wood by day and seats 2 woodcutters per level.', { passive: { wood: 1.5 }, max: 3, requires: [B('smallHouse'), L('wood', 150)] }),
   def('farm', 'Farm', 'Basic', { wood: 50, stone: 30 }, 'Automates food. Trickles food by day and seats 2 farmers per level.', { passive: { food: 1.5 }, max: 4, requires: [B('smallHouse'), L('food', 50)] }),
   def('quarry', 'Quarry', 'Basic', { wood: 80, stone: 40 }, 'Exposes workable stone. Seats 2 miners or masons per level.', { passive: { stone: 1 }, max: 3, requires: [B('woodcutterHut'), L('stone', 60)] }),
@@ -84,7 +104,7 @@ export const BUILDINGS = [
   def('animalSanctuary', 'Animal Sanctuary', 'Estate', { wood: 100, stone: 50, food: 100 }, 'Pets are kept safe and learn faster.', { effect: { petXp: 10 }, requires: [U('animalTracks')] }),
   def('monsterSanctuary', 'Monster Sanctuary', 'Estate', { wood: 150, stone: 120, iron: 30 }, 'Captured creatures can rest here.', { effect: { monster: 1 }, requires: [B('barracks'), T('wins', 3)] }),
   def('dungeonEntrance', 'Dungeon Entrance', 'Estate', { wood: 100, stone: 150, torch: 10 }, 'A sealed stairwell below.', { effect: { dungeon: 1 }, requires: [D(3)] }),
-  def('warehouse', 'Warehouse', 'Estate', { wood: 140, stone: 80, iron: 15 }, 'Stores much more.', { capKey: 'storage', capTable: WAREHOUSE_TABLE, max: 3, requires: [B('storage'), LV(10)] }),
+  def('warehouse', 'Warehouse', 'Storage', { wood: 140, stone: 80, iron: 15 }, 'A great hall that adds room to every store at once.', { capKey: 'storage', capTable: WAREHOUSE_TABLE, capClass: 'all', max: 3, requires: [B('lumberYard'), LV(10)] }),
   def('tradingPost', 'Trading Post', 'Estate', { wood: 110, stone: 50, gold: 50 }, 'Trade routes take shape. Seats traders.', { effect: { trade: 20 }, requires: [U('trading'), LV(10)] }),
   def('farmingEstate', 'Farming Estate', 'Estate', { wood: 130, stone: 50, seeds: 20 }, 'Fields stretch beyond the firelight.', { passive: { food: 6 }, requires: [B('farm'), LV(14), L('seeds', 1)] }),
   // Arcane
@@ -118,3 +138,12 @@ export const ACTIONS = {
 
   caveExplore: { name: 'Explore the Cave', description: 'Push a little farther into the deep. Costs a torch.', rewards: { torch: -1, iron: 3, coal: 3, ancientDust: 1 }, cooldown: 10, tab: 'Cave', requires: [U('darkCave')], bonus: 'explore', bless: ['caveExplore'], combat: [0, 10, .22], relicChance: .18 }
 };
+
+// Groups used to keep the Village screen tidy.
+export const BUILDING_GROUPS = [
+  ['Housing & comfort', ['smallHouse', 'castle', 'well', 'tavern', 'hospital', 'temple']],
+  ['Food & materials', ['woodcutterHut', 'farm', 'quarry', 'hunterLodge', 'fishermanHut', 'bakery', 'sawmill', 'mine', 'farmingEstate']],
+  ['Workshops & trade', ['workshop', 'blacksmith', 'jeweller', 'marketplace', 'tradingPost', 'harbour', 'guildHall', 'treasury', 'alchemistLab']],
+  ['Defence & heroes', ['barracks', 'watchtower', 'trainingGrounds', 'stable', 'monsterSanctuary', 'animalSanctuary', 'dungeonEntrance', 'dragonRoost']],
+  ['Knowledge & magic', ['library', 'academy', 'researchLab', 'mageTower', 'magicObservatory']]
+];
