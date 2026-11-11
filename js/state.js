@@ -56,7 +56,7 @@ export function createNewState() {
     claimedAchievements: [],
     tracking: { actions: 0, builds: 0, wins: 0, relics: 0, expedition: 0, gatherWood: 0, mineStone: 0, buildSmallHouse: 0, craftTorch: 0, tracks: 0, ruinsSearch: 0, events: 0, peakVillagers: 0 },
     logs: [{ at: now, text: 'Dawn is cold and grey. The nearest trees are within reach.' }],
-    selectedTab: 'Camp',
+    selectedTab: 'Main',
     selectedHero: null,
     expeditions: [],
     caveDepth: 0,

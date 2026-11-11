@@ -352,11 +352,15 @@ function baseView() {
 }
 
 function content(stats) {
-  const tabs = game.visibleTabs(TABS);
-  if (!tabs.length) return { nav: '', body: baseView() };
-  if (!tabs.some(t => t.id === game.state.selectedTab)) game.state.selectedTab = tabs[0].id;
-  const nav = `<nav class="nav">${tabs.map(t => `<button ${attribute('tab', t.id)} class="${game.state.selectedTab === t.id ? 'active' : ''}">${t.id}</button>`).join('')}</nav>`;
-  return { nav, body: TAB_RENDERERS[game.state.selectedTab](stats) };
+  // "Main" is always there so the player can return from any tab. The nav bar only appears
+  // once a second tab has been earned, which keeps the very first screen bare.
+  const earned = game.visibleTabs(TABS).filter(t => t.id !== 'Camp');
+  const tabs = [{ id: 'Main' }, ...earned];
+  if (game.state.selectedTab === 'Camp' || !tabs.some(t => t.id === game.state.selectedTab)) game.state.selectedTab = 'Main';
+  const current = game.state.selectedTab;
+  const nav = tabs.length > 1 ? `<nav class="nav">${tabs.map(t => `<button ${attribute('tab', t.id)} class="${current === t.id ? 'active' : ''}">${t.id}</button>`).join('')}</nav>` : '';
+  const body = current === 'Main' ? (game.unlocked('camp') ? campTab(stats) : baseView()) : TAB_RENDERERS[current](stats);
+  return { nav, body };
 }
 
 // ---------------------------------------------------------------------------------------------
