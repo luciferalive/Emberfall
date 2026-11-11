@@ -48,7 +48,7 @@ After that the game opens up on its own: a forest, an old mine with iron, a cave
 ## Features
 
 - **Progressive unlocks.** The screen starts with three counters, one action, and a log. Tabs and resources appear only once earned; unlock rules live in one data table (`js/unlocks.js`).
-- **41 upgradeable buildings** (level 1–10), 18 professions, 30 resources
+- **40 upgradeable buildings** (level 1–10), 18 professions, 30 resources
 - **Day/night clock, 4 seasons, 5 weather types** that change production
 - **Resource accounting:** stock, cap, production, consumption, net, accepted, and overflow, per resource
 - **12 regions** to explore, timed expeditions, **30 enemies and 8 bosses** with text combat

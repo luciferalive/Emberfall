@@ -100,3 +100,4 @@ button.danger { border-color: #7f4f4f; color: #e4bbbb; }
 .wide-table { display: block; overflow-x: auto; }
 @media (max-width: 1040px) { .layout.no-context { grid-template-columns: 210px minmax(0, 1fr); } }
 @media (max-width: 700px) { .layout.no-context { grid-template-columns: 1fr; } .sidebar { display: block; max-height: 220px; overflow-y: auto; } }
+.log-entry { grid-template-columns: 72px 1fr; } .log-time { white-space: nowrap; }

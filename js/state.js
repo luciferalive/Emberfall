@@ -55,7 +55,7 @@ export function createNewState() {
     quests: {},
     claimedAchievements: [],
     tracking: { actions: 0, builds: 0, wins: 0, relics: 0, expedition: 0, gatherWood: 0, mineStone: 0, buildSmallHouse: 0, craftTorch: 0, tracks: 0, ruinsSearch: 0, events: 0, peakVillagers: 0 },
-    logs: [{ at: now, text: 'Night presses close. The nearest trees are within reach.' }],
+    logs: [{ at: now, text: 'Dawn is cold and grey. The nearest trees are within reach.' }],
     selectedTab: 'Camp',
     selectedHero: null,
     expeditions: [],
@@ -546,6 +546,7 @@ export class Game {
   }
   villagerLeaves() {
     const s = this.state;
+    if (s.villagers.length <= 1) return; // the last villager never abandons the fire
     if (this.counters && this.counters.left >= Math.ceil(this.counters.startPop / 2)) return;
     const candidates = s.villagers.filter(v => !v.away).sort((a, b) => a.happiness - b.happiness);
     const leaver = candidates[0];
