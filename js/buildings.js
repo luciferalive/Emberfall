@@ -109,8 +109,8 @@ export const ACTIONS = {
   hunt: { name: 'Hunt', description: 'Follow tracks in the woods.', rewards: { food: 9, fur: 2, leather: 1 }, cooldown: 5, tab: 'Forest', requires: [U('forest')], bonus: 'hunt', bless: ['hunt'], combat: [0, 8, .25] },
   herbs: { name: 'Gather Herbs', description: 'Search the shaded undergrowth.', rewards: { herbs: 4, water: 1 }, cooldown: 4, tab: 'Forest', requires: [U('forest')], bonus: 'herbs', bless: [] },
   forestTreasure: { name: 'Search for Treasure', description: 'Look for a glint beneath the leaves.', rewards: { gold: 8 }, cooldown: 8, tab: 'Forest', requires: [U('forest'), V(2)], bonus: 'gold', bless: [], mapChance: .22 },
-  trackAnimals: { name: 'Track Animals', description: 'Follow unfamiliar prints. See where they lead.', rewards: { food: 3 }, cooldown: 6, tab: 'Forest', requires: [U('forest')], bonus: 'food', bless: [], track: 'tracks', hideWhen: 'animalTracks' },
-  hiddenRuins: { name: 'Search for Ruins', description: 'Something regular lies beneath the moss.', rewards: { stone: 5 }, cooldown: 10, tab: 'Forest', requires: [U('forest'), V(2)], bonus: 'stone', bless: [], track: 'ruinsSearch', hideWhen: 'ancientRuins' },
+  trackAnimals: { name: 'Track Animals', description: 'Follow unfamiliar prints. See where they lead.', rewards: { food: 3 }, cooldown: 6, tab: 'Forest', requires: [U('forest'), V(3)], bonus: 'food', bless: [], track: 'tracks', hideWhen: 'animalTracks' },
+  hiddenRuins: { name: 'Search for Ruins', description: 'Something regular lies beneath the moss.', rewards: { stone: 5 }, cooldown: 10, tab: 'Forest', requires: [U('forest'), U('oldMine'), V(3)], bonus: 'stone', bless: [], track: 'ruinsSearch', hideWhen: 'ancientRuins' },
 
   mineStone: { name: 'Mine Stone', description: 'Cut stone from the shaft wall.', rewards: { stone: 8 }, cooldown: 3, tab: 'Mine', requires: [U('oldMine')], bonus: 'mine', bless: ['mine', 'mineStone'] },
   mineIron: { name: 'Mine Iron', description: 'Follow an exposed red vein.', rewards: { iron: 4, stone: 2 }, cooldown: 5, tab: 'Mine', requires: [U('oldMine')], bonus: 'mine', bless: ['mine', 'mineIron'] },

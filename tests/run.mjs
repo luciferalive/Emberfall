@@ -293,9 +293,10 @@ test('pets unlock through animal tracks; relics through ruins', () => {
   const g = fresh();
   give(g, { wood: 400 });
   g.state.buildings.push({ uid: 'b1', id: 'campfire', level: 1 });
+  g.state.tracking.peakVillagers = 3;
   g.checkUnlocks({ silent: true });
   assert.ok(g.actionAvailable('trackAnimals'));
-  for (let i = 0; i < 3; i++) { g.state.actionCooldowns = {}; g.doAction('trackAnimals'); }
+  for (let i = 0; i < 8; i++) { g.state.actionCooldowns = {}; g.doAction('trackAnimals'); }
   assert.ok(g.unlocked('animalTracks'));
   assert.ok(visibleIds(g).includes('Pets'));
   assert.equal(g.findRelic(), false === g.unlocked('ancientRuins') ? false : true);
