@@ -14,6 +14,20 @@ window.__emberfallGame = game;
 const root = document.querySelector('#app');
 let modal = null;
 
+// Interface text size: a viewer preference stored apart from the game save.
+const UI_KEY = 'emberfall-ui-scale';
+const UI_MIN = 70, UI_MAX = 200, UI_STEP = 10;
+let uiScale = 100;
+try { const v = Number(localStorage.getItem(UI_KEY)); if (v >= UI_MIN && v <= UI_MAX) uiScale = Math.round(v); } catch { /* storage unavailable */ }
+function applyScale() { document.documentElement.style.setProperty('--ui-scale', String(uiScale / 100)); }
+function setScale(value) {
+  uiScale = Math.min(UI_MAX, Math.max(UI_MIN, Math.round(value)));
+  try { localStorage.setItem(UI_KEY, String(uiScale)); } catch { /* ignore */ }
+  applyScale();
+  render();
+}
+applyScale();
+
 const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
 const fmt = value => game.format(value);
 const cost = object => game.describeCost(object);
@@ -405,7 +419,7 @@ function render() {
   const info = game.timeInfo();
   const pending = game.state.pendingEvent ? eventCard(game.state.pendingEvent) : '';
   const context = contextPanel();
-  root.innerHTML = `<div class="game-shell"><header class="masthead"><div><span class="logo">EMBERFALL</span> <span class="tagline">a settlement in the dark</span></div>${game.unlocked('camp') ? `<div class="clock">Day ${info.day} · ${info.time} · ${info.daytime ? 'day' : 'night'} · ${info.season} · ${info.weather}</div>` : ''}</header>
+  root.innerHTML = `<div class="game-shell"><header class="masthead"><div><span class="logo">EMBERFALL</span> <span class="tagline">a settlement in the dark</span></div><div class="masthead-right"><div class="text-size" title="Text size"><span class="dim">Text</span><button ${attribute('ui', 'down')} ${uiScale <= UI_MIN ? 'disabled' : ''} aria-label="Smaller text">A\u2212</button><span class="size-value">${uiScale}%</span><button ${attribute('ui', 'up')} ${uiScale >= UI_MAX ? 'disabled' : ''} aria-label="Larger text">A+</button>${uiScale !== 100 ? `<button ${attribute('ui', 'reset')}>Reset</button>` : ''}</div>${game.unlocked('camp') ? `<div class="clock">Day ${info.day} · ${info.time} · ${info.daytime ? 'day' : 'night'} · ${info.season} · ${info.weather}</div>` : ''}</div></header>
     <div class="layout ${context ? '' : 'no-context'}">${sidebar(stats)}<main class="main">${nav}<section class="tab-content">${pending}${body}</section></main>${context}</div>${logPanel()}</div>${modalMarkup()}`;
   SCROLLERS.forEach((sel, i) => { const el = root.querySelector(sel); if (el) el.scrollTop = saved[i]; });
 }
@@ -414,6 +428,7 @@ root.addEventListener('click', event => {
   const button = event.target.closest('button');
   if (!button || button.disabled) return;
   const data = button.dataset;
+  if (data.ui) { setScale(data.ui === 'up' ? uiScale + UI_STEP : data.ui === 'down' ? uiScale - UI_STEP : 100); return; }
   if (data.tab) { game.state.selectedTab = data.tab; game.emit(); return; }
   if (data.action) game.doAction(data.action);
   else if (data.build) game.build(data.build);

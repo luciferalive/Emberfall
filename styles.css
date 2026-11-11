@@ -17,7 +17,7 @@
   color: var(--ink);
 }
 
-html { font-size: clamp(15px, 0.4vw + 11px, 20px); }
+html { font-size: calc(clamp(15px, 0.4vw + 11px, 20px) * var(--ui-scale, 1)); }
 * { box-sizing: border-box; }
 html, body, #app { min-height: 100%; margin: 0; }
 body { background: #050607; font-size: 1rem; line-height: 1.45; }
@@ -102,3 +102,9 @@ button.danger { border-color: #7f4f4f; color: #e4bbbb; }
 @media (max-width: 1040px) { .layout.no-context { grid-template-columns: 15rem minmax(0, 1fr); } }
 @media (max-width: 700px) { .layout.no-context { grid-template-columns: 1fr; } .sidebar { display: block; max-height: 220px; overflow-y: auto; } }
 .log-entry { grid-template-columns: 5.5rem 1fr; } .log-time { white-space: nowrap; }
+
+.masthead { flex-wrap: wrap; gap: 6px 14px; }
+.masthead-right { display: flex; align-items: baseline; gap: 6px 16px; flex-wrap: wrap; justify-content: flex-end; }
+.text-size { display: flex; align-items: center; gap: 4px; }
+.text-size button { padding: 1px 7px; }
+.size-value { min-width: 3.2em; text-align: center; color: var(--muted); font-size: .875rem; }

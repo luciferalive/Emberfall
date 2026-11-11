@@ -41,6 +41,7 @@ After that the game opens up on its own: a forest, an old mine with iron, a cave
 - Watch the **Warnings** panel on the left. It tells you about hunger and full storage before they hurt.
 - Build a **Well** early. Clean water is a happiness boost.
 - Upgrading beats rebuilding: levels go to 10 and each one visibly changes the numbers.
+- Use **A− / A+** in the top-right corner to change the text size (70%–200%). It is remembered in your browser.
 - **Export** your save from the log panel now and then. Saves live in your browser's local storage.
 
 ---
