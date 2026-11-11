@@ -87,3 +87,16 @@ button.danger { border-color: #7f4f4f; color: #e4bbbb; }
 
 @media (max-width: 1040px) { .layout { grid-template-columns: 210px minmax(0, 1fr); }.context { display: none; }.sidebar, .tab-content { max-height: none; }.game-shell { min-height: 100dvh; } }
 @media (max-width: 700px) { body { font-size: 12px; }.game-shell { padding: 5px; gap: 5px; }.layout { grid-template-columns: 1fr; }.sidebar { display: none; }.main { min-height: 560px; }.tab-content { max-height: none; }.masthead .tagline { display:none; }.two-col { grid-template-columns: 1fr; }.card-grid { grid-template-columns: 1fr; }.action-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }.log-panel { max-height: 140px; } }
+
+/* Update 2.0 */
+.layout.no-context { grid-template-columns: minmax(220px, .85fr) minmax(440px, 3fr); }
+.instance { border-top: 1px solid var(--line); margin: 6px 0; padding-top: 5px; }
+.event-card { margin-bottom: 10px; }
+.log-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.log-head .section-title { margin: 0; }
+.log-head button { padding: 2px 6px; font-size: 11px; }
+.notice { display: block; margin: 2px 0; }
+.sidebar .notice { padding: 2px 0; }
+.wide-table { display: block; overflow-x: auto; }
+@media (max-width: 1040px) { .layout.no-context { grid-template-columns: 210px minmax(0, 1fr); } }
+@media (max-width: 700px) { .layout.no-context { grid-template-columns: 1fr; } .sidebar { display: block; max-height: 220px; overflow-y: auto; } }

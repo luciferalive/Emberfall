@@ -1,4 +1,6 @@
-export const VERSION = 1;
+export const VERSION = 2;
+
+export { PROFESSIONS, PROFESSION_BY_ID, BUILDINGS, BUILDING_BY_ID, ACTIONS, BASE_STORAGE, VILLAGE_TIERS } from './buildings.js';
 
 export const RESOURCES = [
   ['wood','Wood',100], ['stone','Stone',60], ['food','Food',100], ['gold','Gold',100],
@@ -9,31 +11,10 @@ export const RESOURCES = [
   ['meat','Meat',0], ['seeds','Seeds',0], ['gems','Gems',0], ['essence','Essence',0],
   ['silk','Silk',0], ['ancientCoins','Ancient Coins',0], ['water','Water',0], ['research','Research',0],
   ['healingPotion','Healing Potion',0], ['maps','Treasure Maps',0], ['prestige','Ember Shards',0]
-].map(([id,name,start]) => ({ id, name, start }));
+].map(([id,name]) => ({ id, name, start: 0 }));
 
 export const RESOURCE_BY_ID = Object.fromEntries(RESOURCES.map(x => [x.id, x]));
 
-export const PROFESSIONS = [
-  ['idle','Idle','Await a task.',{}],
-  ['woodcutter','Woodcutter','Brings timber from the tree line.',{wood:5}],
-  ['miner','Miner','Works the shallow deposits.',{stone:3, iron:.35}],
-  ['farmer','Farmer','Tends crops around the fire.',{food:8,seeds:.4}],
-  ['hunter','Hunter','Tracks game in the forest.',{food:3,leather:1,fur:.5}],
-  ['fisherman','Fisherman','Fishes the underground lake.',{food:5,water:1}],
-  ['blacksmith','Blacksmith','Refines rough metal.',{steel:.45}],
-  ['herbalist','Herbalist','Gathers useful plants.',{herbs:2,essence:.15}],
-  ['builder','Builder','Makes construction less costly.',{}],
-  ['guard','Guard','Keeps the settlement safe.',{}],
-  ['researcher','Researcher','Studies the old world.',{research:1.5}],
-  ['merchant','Merchant','Improves sale prices.',{gold:1}],
-  ['cook','Cook','Turns food into morale.',{}],
-  ['alchemist','Alchemist','Extracts magical compounds.',{magicEssence:.35}],
-  ['explorer','Explorer','Improves expedition rewards.',{}],
-  ['lumberjack','Lumberjack','Clears larger stands.',{wood:8}],
-  ['furHunter','Fur Hunter','Brings pelts and meat.',{fur:1.5,meat:2}],
-  ['stoneMason','Stone Mason','Cuts useful stone.',{stone:6}],
-  ['trader','Trader','Finds better offers.',{silver:.5}]
-].map(([id,name,description,production]) => ({id,name,description,production}));
 
 export const PERSONALITIES = [
   ['Hardworking','production',.15], ['Lucky','rare',.10], ['Brave','combat',.15],
@@ -41,50 +22,6 @@ export const PERSONALITIES = [
   ['Adventurous','explore',.15], ['Inventive','craft',.15]
 ].map(([name,bonus,value]) => ({name,bonus,value}));
 
-export const BUILDINGS = [
-  ['campfire','Campfire','Basic',{wood:10,stone:5},'The small flame is your first claim against the dark.',{happiness:2}],
-  ['smallHouse','Small House','Basic',{wood:20,stone:10},'Room for two more people.',{housing:2}],
-  ['farm','Farm','Basic',{wood:30},'A dependable plot of food.',{food:4}],
-  ['woodcutterHut','Woodcutter Hut','Basic',{wood:25},'Shelter for timber workers.',{wood:3}],
-  ['quarry','Quarry','Basic',{wood:30,stone:15},'Exposes workable stone.',{stone:2}],
-  ['storage','Storage','Basic',{wood:25},'Raises resource capacity.',{storage:250}],
-  ['well','Well','Basic',{wood:20,stone:15},'Fresh water raises spirits.',{water:3,happiness:1}],
-  ['workshop','Workshop','Basic',{wood:40,stone:20},'Allows basic fabrication.',{craft:1}],
-  ['tavern','Tavern','Basic',{wood:60,stone:20},'A warm room for newcomers.',{recruit:5,happiness:3}],
-  ['hunterLodge','Hunter Lodge','Basic',{wood:45,stone:10},'Supports hunting parties.',{food:2,leather:1}],
-  ['fishermanHut','Fisherman’s Hut','Basic',{wood:35,stone:10},'Opens the lake fishery.',{food:3,water:1}],
-  ['blacksmith','Blacksmith','Advanced',{wood:80,stone:50,iron:10},'Refines iron and arms defenders.',{steel:.7,combat:2}],
-  ['barracks','Barracks','Advanced',{wood:100,stone:70,iron:15},'Guards and heroes train here.',{guard:2,combat:3}],
-  ['hospital','Hospital','Advanced',{wood:75,stone:45,herbs:20},'Heroes recover more quickly.',{recovery:20,happiness:2}],
-  ['marketplace','Marketplace','Advanced',{wood:90,stone:40,gold:30},'Merchants visit more often.',{trade:10}],
-  ['library','Library','Advanced',{wood:80,stone:60,gold:20},'Knowledge survives here.',{research:2}],
-  ['mageTower','Mage Tower','Advanced',{stone:120,crystal:10,magicEssence:5},'An observatory for strange energies.',{magic:1}],
-  ['watchtower','Watchtower','Advanced',{wood:70,stone:80},'Warns of danger.',{combat:2,rare:2}],
-  ['stable','Stable','Advanced',{wood:90,stone:30,leather:15},'Care for swift mounts.',{travel:10}],
-  ['guildHall','Guild Hall','Advanced',{wood:120,stone:80,gold:50},'Experts share their work.',{production:3}],
-  ['trainingGrounds','Training Grounds','Advanced',{wood:80,stone:60,iron:20},'Heroes gain experience faster.',{heroXp:15}],
-  ['alchemistLab','Alchemist Laboratory','Advanced',{wood:100,stone:50,herbs:30,crystal:5},'Brews potions and extracts.',{alchemy:1}],
-  ['castle','Castle','Royal',{wood:300,stone:400,steel:50,gold:200},'The settlement becomes a realm.',{housing:10,happiness:5}],
-  ['treasury','Treasury','Royal',{wood:140,stone:100,gold:100,steel:15},'Protects and compounds wealth.',{gold:5}],
-  ['bakery','Bakery','Estate',{wood:70,stone:35,food:20},'Makes food go farther.',{food:5,happiness:2}],
-  ['sawmill','Sawmill','Estate',{wood:100,stone:45,iron:10},'Processes timber efficiently.',{wood:7}],
-  ['mine','Mine','Estate',{wood:120,stone:100,iron:20},'Reaches deeper ore veins.',{iron:2,coal:1}],
-  ['jeweller','Jeweller','Estate',{wood:80,stone:40,gold:50,gems:3},'Cuts gems for value.',{gems:.4,gold:2}],
-  ['temple','Temple','Estate',{wood:100,stone:120,gold:50},'Offers blessings to the faithful.',{blessing:1,happiness:4}],
-  ['harbour','Harbour','Estate',{wood:180,stone:100,gold:60},'Water trade expands.',{trade:15,travel:10}],
-  ['animalSanctuary','Animal Sanctuary','Estate',{wood:100,stone:50,food:100},'Pets are kept safe.',{petXp:10}],
-  ['monsterSanctuary','Monster Sanctuary','Estate',{wood:150,stone:120,iron:30},'Captured creatures can rest.',{monster:1}],
-  ['dungeonEntrance','Dungeon Entrance','Estate',{wood:100,stone:150,torch:10},'A sealed stairwell below.',{dungeon:1}],
-  ['academy','Academy','Arcane',{wood:160,stone:140,gold:120,research:20},'Advanced studies flourish.',{research:5}],
-  ['magicObservatory','Magic Observatory','Arcane',{stone:180,crystal:25,magicEssence:15},'Stars reveal hidden paths.',{explore:10}],
-  ['dragonRoost','Dragon Roost','Arcane',{wood:220,stone:180,dragonScales:5,gold:150},'A home for a draconic companion.',{dragon:1,combat:5}],
-  ['warehouse','Warehouse','Estate',{wood:140,stone:80,iron:15},'Stores much more.',{storage:800}],
-  ['tradingPost','Trading Post','Estate',{wood:110,stone:50,gold:50},'Trade routes take shape.',{trade:20}],
-  ['farmingEstate','Farming Estate','Estate',{wood:130,stone:50,seeds:20},'Fields stretch beyond the firelight.',{food:12}],
-  ['researchLab','Research Laboratory','Arcane',{wood:150,stone:120,crystal:15,research:30},'Experiments accelerate discovery.',{research:8}]
-].map(([id,name,tier,cost,description,effect]) => ({id,name,tier,cost,description,effect}));
-
-export const BUILDING_BY_ID = Object.fromEntries(BUILDINGS.map(x => [x.id, x]));
 
 export const REGIONS = [
   ['greenForest','Green Forest',0,1,['wood','food','herbs'],'wolf', 'Sunlight barely filters through the old canopy.'],
@@ -149,11 +86,11 @@ export const RESEARCH = {
 export const QUESTS = [
   {id:'firstSteps',type:'Main',name:'Keep the Flame',text:'Gather 150 wood.',metric:'gatherWood',target:150,reward:{gold:25,torch:3}},
   {id:'settle',type:'Main',name:'A Place to Stay',text:'Build two Small Houses.',metric:'buildSmallHouse',target:2,reward:{food:40,gold:20}},
-  {id:'deepStone',type:'Main',name:'Below the Surface',text:'Mine 30 stone.',metric:'mineStone',target:30,reward:{iron:8,torch:4}},
-  {id:'forestWalk',type:'Exploration',name:'Beyond the Firelight',text:'Complete a Green Forest expedition.',metric:'expedition',target:1,reward:{maps:1,food:30}},
-  {id:'craftTorch',type:'Daily',name:'Tools for the Dark',text:'Craft 3 torches.',metric:'craftTorch',target:3,reward:{wood:20,stone:10}},
-  {id:'hunterPath',type:'Combat',name:'A Safer Trail',text:'Win 3 encounters.',metric:'wins',target:3,reward:{leather:8,gold:30}},
-  {id:'collector',type:'Collection',name:'Curious Things',text:'Find 3 relics.',metric:'relics',target:3,reward:{research:15,gems:2}},
+  {id:'deepStone',needs:'oldMine',type:'Main',name:'Below the Surface',text:'Mine 30 stone.',metric:'mineStone',target:30,reward:{iron:8,torch:4}},
+  {id:'forestWalk',needs:'map',type:'Exploration',name:'Beyond the Firelight',text:'Complete a Green Forest expedition.',metric:'expedition',target:1,reward:{maps:1,food:30}},
+  {id:'craftTorch',needs:'crafting',type:'Daily',name:'Tools for the Dark',text:'Craft 3 torches.',metric:'craftTorch',target:3,reward:{wood:20,stone:10}},
+  {id:'hunterPath',needs:'heroes',type:'Combat',name:'A Safer Trail',text:'Win 3 encounters.',metric:'wins',target:3,reward:{leather:8,gold:30}},
+  {id:'collector',needs:'ancientRuins',type:'Collection',name:'Curious Things',text:'Find 3 relics.',metric:'relics',target:3,reward:{research:15,gems:2}},
   {id:'weeklyBuilder',type:'Weekly',name:'Growing Settlement',text:'Build 8 structures.',metric:'builds',target:8,reward:{gold:80,wood:100,stone:75}}
 ];
 
@@ -162,21 +99,15 @@ const achievementNames = [
 ];
 export const ACHIEVEMENTS = achievementNames.map((name,index) => ({id:`a${index+1}`,name,description:['Begin your watch.','Reach a new milestone.','Make the dark a little smaller.'][index%3],target:(Math.floor(index/5)+1)*5,kind:['actions','builds','wins','relics','expedition'][index%5],reward:{gold:10+(index*3),research:index%4===0?3:0}}));
 
+export const SELL_VALUES = { wood:.3, stone:.4, food:.3, herbs:.6, iron:.8, coal:.7, fur:.8, leather:.9, bones:.4, meat:.5, seeds:.4, water:.2, steel:1.6, torch:.8, silver:1.2, crystal:2.5, sulfur:1.5, mithril:3, ancientDust:2, magicEssence:2.5, dragonScales:4, gems:3, essence:2.2, silk:2, ancientCoins:2.5 };
+export const TRADABLE = Object.keys(SELL_VALUES);
+
 export const MERCHANT_ITEMS = [
+  {id:'mStone',resource:'stone',amount:40,cost:10,currency:'gold'},
   {id:'mWood',resource:'wood',amount:40,cost:12,currency:'gold'}, {id:'mFood',resource:'food',amount:45,cost:12,currency:'gold'},
   {id:'mIron',resource:'iron',amount:8,cost:25,currency:'gold'}, {id:'mHerbs',resource:'herbs',amount:12,cost:18,currency:'gold'},
   {id:'mTorch',resource:'torch',amount:5,cost:10,currency:'gold'}, {id:'mMap',resource:'maps',amount:1,cost:30,currency:'gold'}
 ];
 
-export const ACTIONS = {
-  gather: {name:'Gather Wood',description:'Collect fallen timber near the fire.',rewards:{wood:10},cooldown:2},
-  mineStone: {name:'Mine Stone',description:'Chip at the cave mouth.',rewards:{stone:8},cooldown:3},
-  mineIron: {name:'Mine Iron',description:'Follow an exposed red vein.',rewards:{iron:4,stone:2},cooldown:5},
-  mineCoal: {name:'Mine Coal',description:'Bring back fuel from the black seam.',rewards:{coal:5,stone:2},cooldown:5},
-  hunt: {name:'Hunt',description:'Follow tracks in the woods.',rewards:{food:9,fur:2,leather:1},cooldown:5},
-  herbs: {name:'Gather Herbs',description:'Search the shaded undergrowth.',rewards:{herbs:4,water:1},cooldown:4},
-  forestTreasure: {name:'Search for Treasure',description:'Look for a glint beneath the leaves.',rewards:{gold:9,ancientCoins:1},cooldown:8},
-  caveExplore: {name:'Explore the Cave',description:'Push a little farther into the deep.',rewards:{torch:-1,iron:3,coal:3,ancientDust:1},cooldown:10}
-};
 
 export const NAMES = ['Alden','Bran','Cira','Dara','Elian','Fenn','Galen','Hesta','Ira','Jory','Kara','Lio','Mira','Nell','Orin','Pela','Quill','Rysa','Soren','Tala','Una','Venn','Wren','Yara','Zed'];

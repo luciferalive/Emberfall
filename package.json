@@ -1,9 +1,12 @@
 {
   "name": "emberfall",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "check": "node --check js/data.js && node --check js/state.js && node --check js/app.js"
-  }
+    "check": "node --check js/data.js && node --check js/buildings.js && node --check js/unlocks.js && node --check js/time.js && node --check js/state.js && node --check js/app.js",
+    "test": "node tests/run.mjs",
+    "start": "npx serve ."
+  },
+  "description": "EMBERFALL: a minimalist text-based incremental survival and settlement game for the browser."
 }
