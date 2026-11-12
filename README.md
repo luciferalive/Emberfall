@@ -6,7 +6,7 @@ You begin alone, in the dark, with nothing. Chop a tree. Gather stones. Light a 
 
 No pixel art. No sprites. No animations. Just text, numbers, and a fire.
 
-**[▶ Play it](https://luciferalive.github.io/emberfall/)** (enable GitHub Pages: *Settings → Pages → Deploy from branch → `main` / root*)
+**[▶ Play it](https://luciferalive.github.io/emberfall/)** 
 
 ---
 
