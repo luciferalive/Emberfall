@@ -6,6 +6,7 @@ import {
 } from './data.js';
 import { TABS } from './unlocks.js';
 import { SCHEDULES } from './time.js';
+import { layoutSettlement, renderSettlementSvg, DISTRICTS } from './settlementmap.js';
 
 // A reload of the module (or a second import) must never leave a second game loop running.
 if (window.__emberfallGame) window.__emberfallGame.stop();
@@ -395,7 +396,25 @@ function questsTab() {
   }).join('') || '<div class="empty">No quests right now.</div>'}</div>`;
 }
 
-const TAB_RENDERERS = { Main: mainTab, Village: villageTab, Villagers: villagersTab, Stores: storesTab, Forest: forestTab, Mine: mineTab, Cave: caveTab, Estate: estateTab, Map: mapTab, Trade: tradeTab, Crafting: craftingTab, Dungeon: dungeonTab, Research: researchTab, Heroes: heroesTab, Pets: petsTab, Quests: questsTab, Achievements: achievementsTab, Events: eventsTab };
+let selectedPlot = null;
+function settlementTab(stats) {
+  const layout = layoutSettlement(game);
+  const all = [...layout.nodes, ...layout.plots];
+  const chosen = all.find(n => n.key === selectedPlot) || null;
+  if (!chosen) selectedPlot = null;
+  const info = game.timeInfo();
+  const levels = game.totalBuildingLevels();
+  const legend = Object.entries(DISTRICTS).filter(([key]) => layout.nodes.some(n => n.district === key)).map(([, d]) => `<span class="legend-item"><i style="background:${d.color}"></i>${d.name}</span>`).join('');
+  const def = chosen ? BUILDINGS.find(b => b.id === chosen.id) : null;
+  return `${head('Settlement', 'A blueprint of your settlement. New roads, plots and landmarks appear as you build and unlock. Select a plot to manage it.')}
+    <div class="strip"><span><b>${layout.nodes.length}</b> buildings</span><span><b>${levels}</b> levels</span><span><b>${stats.pop}</b> villagers</span><span>${info.daytime ? 'day' : 'night'}, ${info.season.toLowerCase()}</span></div>
+    <div class="map-tools"><span>Drag to pan</span><button data-mapzoom="out" aria-label="Zoom out">−</button><button data-mapzoom="fit">Fit</button><button data-mapzoom="in" aria-label="Zoom in">+</button></div>
+    <div class="map-frame">${renderSettlementSvg(layout, { selected: selectedPlot, night: !info.daytime, day: info.day, zoom: mapView.zoom })}</div>
+    <div class="legend">${legend}<span class="legend-item"><i class="dashed"></i>Plot you could build</span></div>
+    ${def ? `<div class="map-detail"><div class="card-grid">${buildingCard(def)}</div></div>` : '<p class="tiny dim">Select a plot above to see its details, upgrade it, or build it.</p>'}`;
+}
+
+const TAB_RENDERERS = { Main: mainTab, Village: villageTab, Settlement: settlementTab, Villagers: villagersTab, Stores: storesTab, Forest: forestTab, Mine: mineTab, Cave: caveTab, Estate: estateTab, Map: mapTab, Trade: tradeTab, Crafting: craftingTab, Dungeon: dungeonTab, Research: researchTab, Heroes: heroesTab, Pets: petsTab, Quests: questsTab, Achievements: achievementsTab, Events: eventsTab };
 
 function content(stats) {
   // "Main" is always there so the player can return from any tab. The nav bar only appears
@@ -456,12 +475,16 @@ function modalMarkup() {
 // Rendering and input
 // ---------------------------------------------------------------------------------------------
 const SCROLLERS = ['.sidebar', '.tab-content', '.log-body', '.modal'];
+// Blueprint map view: pan position and zoom survive the once-a-second redraw.
+const mapView = { left: null, top: null, zoom: null, dragged: false };
 
 function render() {
   const active = document.activeElement;
   // Do not tear down a control the player is using (an open drop-down or a text box).
   if (active && /^(SELECT|TEXTAREA|INPUT)$/.test(active.tagName) && root.contains(active)) return;
   const saved = SCROLLERS.map(sel => { const el = root.querySelector(sel); return el ? el.scrollTop : 0; });
+  const oldFrame = root.querySelector('.map-frame');
+  if (oldFrame) { mapView.left = oldFrame.scrollLeft; mapView.top = oldFrame.scrollTop; }
   const stats = game.getStats();
   const { nav, body } = content(stats);
   const info = game.timeInfo();
@@ -470,7 +493,27 @@ function render() {
     <div class="masthead-right">${game.unlocked('camp') ? `<div class="clock">Day ${info.day} · ${info.time} · ${info.daytime ? 'day' : 'night'} · ${info.season} · ${info.weather}</div>` : ''}${settingsMenu()}</div></header>
     <div class="layout">${sidebar(stats)}<main class="main">${nav}<section class="tab-content">${pending}${body}</section></main></div>${logPanel()}</div>${modalMarkup()}`;
   SCROLLERS.forEach((sel, i) => { const el = root.querySelector(sel); if (el) el.scrollTop = saved[i]; });
+  const frame = root.querySelector('.map-frame');
+  if (frame) {
+    if (mapView.left === null) { frame.scrollLeft = (frame.scrollWidth - frame.clientWidth) / 2; frame.scrollTop = (frame.scrollHeight - frame.clientHeight) / 2; }
+    else { frame.scrollLeft = mapView.left; frame.scrollTop = mapView.top; }
+  } else { mapView.left = null; mapView.top = null; }
 }
+
+// Drag the map to pan it.
+let drag = null;
+root.addEventListener('mousedown', event => {
+  const frame = event.target.closest('.map-frame');
+  if (!frame || event.button !== 0) return;
+  drag = { frame, x: event.clientX, y: event.clientY, left: frame.scrollLeft, top: frame.scrollTop, moved: false };
+});
+window.addEventListener('mousemove', event => {
+  if (!drag) return;
+  const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+  if (!drag.moved && Math.hypot(dx, dy) > 5) { drag.moved = true; drag.frame.classList.add('dragging'); }
+  if (drag.moved) { drag.frame.scrollLeft = drag.left - dx; drag.frame.scrollTop = drag.top - dy; mapView.left = drag.frame.scrollLeft; mapView.top = drag.frame.scrollTop; }
+});
+window.addEventListener('mouseup', () => { if (drag) { mapView.dragged = drag.moved; drag.frame.classList.remove('dragging'); drag = null; setTimeout(() => { mapView.dragged = false; }, 0); } });
 
 root.addEventListener('click', event => {
   // Dropdowns are toggled here (not natively) so the open state survives the once-a-second redraw.
@@ -480,6 +523,11 @@ root.addEventListener('click', event => {
     if (details?.dataset?.panel) { event.preventDefault(); panels[details.dataset.panel] = !details.open; savePanels(); render(); }
     return;
   }
+  if (mapView.dragged) return;
+  const zoomBtn = event.target.closest('[data-mapzoom]');
+  if (zoomBtn) { const m = zoomBtn.dataset.mapzoom; mapView.zoom = m === 'fit' ? null : Math.min(2, Math.max(0.5, (mapView.zoom ?? 1) + (m === 'in' ? 0.2 : -0.2))); mapView.left = null; mapView.top = null; render(); return; }
+  const plot = event.target.closest('[data-mapnode]');
+  if (plot && !event.target.closest('button')) { selectedPlot = selectedPlot === plot.dataset.mapnode ? null : plot.dataset.mapnode; render(); return; }
   const button = event.target.closest('button');
   if (!button || button.disabled) return;
   const data = button.dataset;

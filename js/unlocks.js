@@ -74,6 +74,7 @@ export const FEATURES = [
 export const TABS = [
   { id: 'Camp', feature: 'camp' },
   { id: 'Village', feature: 'villageTab' },
+  { id: 'Settlement', feature: 'villageTab' },
   { id: 'Villagers', feature: 'villagerMgmt' },
   { id: 'Stores', feature: 'ledger' },
   { id: 'Forest', feature: 'forest' },
