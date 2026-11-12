@@ -51,7 +51,7 @@ After that the game opens up on its own: a forest, an old mine with iron, a cave
 ## Features
 
 - **Clean by design.** Details hide behind dropdowns: card **Info**, grouped village sections, a one-line **Log** you can expand, and a **Settings** menu (text size, save, export, import, reset). Finished achievements and quests disappear. Open panels are remembered.
-- **Settlement blueprint map.** A blueprint-style plan with a unique line drawing for every building. Roads, plots and landmarks (forest, mine, cave, ruins, shore, estate wall) appear as you build and unlock; drag to pan, zoom, and click a plot to build or upgrade.
+- **Settlement map.** A top-down map with grass, trees, a river and dirt roads, and a unique drawing for every building. Roads, bridges and landmarks (forest, mine, cave, ruins, shore, estate wall) appear as you build and unlock; drag to pan, zoom, and click a plot to build or upgrade.
 - **Progressive unlocks.** The screen starts with three counters, one action, and a log. Tabs and resources appear only once earned; unlock rules live in one data table (`js/unlocks.js`).
 - **40 upgradeable buildings** (level 1–10), 18 professions, 30 resources
 - **Day/night clock, 4 seasons, 5 weather types** that change production

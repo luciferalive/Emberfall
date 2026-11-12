@@ -406,7 +406,7 @@ function settlementTab(stats) {
   const levels = game.totalBuildingLevels();
   const legend = Object.entries(DISTRICTS).filter(([key]) => layout.nodes.some(n => n.district === key)).map(([, d]) => `<span class="legend-item"><i style="background:${d.color}"></i>${d.name}</span>`).join('');
   const def = chosen ? BUILDINGS.find(b => b.id === chosen.id) : null;
-  return `${head('Settlement', 'A blueprint of your settlement. New roads, plots and landmarks appear as you build and unlock. Select a plot to manage it.')}
+  return `${head('Settlement', 'Your settlement from above. Roads, bridges and landmarks appear as you build and unlock. Select a plot to manage it.')}
     <div class="strip"><span><b>${layout.nodes.length}</b> buildings</span><span><b>${levels}</b> levels</span><span><b>${stats.pop}</b> villagers</span><span>${info.daytime ? 'day' : 'night'}, ${info.season.toLowerCase()}</span></div>
     <div class="map-tools"><span>Drag to pan</span><button data-mapzoom="out" aria-label="Zoom out">−</button><button data-mapzoom="fit">Fit</button><button data-mapzoom="in" aria-label="Zoom in">+</button></div>
     <div class="map-frame">${renderSettlementSvg(layout, { selected: selectedPlot, night: !info.daytime, day: info.day, zoom: mapView.zoom })}</div>

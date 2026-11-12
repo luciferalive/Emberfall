@@ -30,6 +30,7 @@ const districtOf = (() => {
 export { districtOf };
 
 const rad = d => (d * Math.PI) / 180;
+const riverAt = (deg, R) => { const t = rad(deg); return R + 16 * Math.sin(3 * t + 0.5) + 9 * Math.sin(7 * t + 1.3); };
 const polar = (deg, r) => ({ x: Math.round(r * Math.cos(rad(deg))), y: Math.round(r * SQ * Math.sin(rad(deg))) });
 
 // Plot positions are worked out once, up front: districts take turns claiming the first free spot
@@ -122,16 +123,18 @@ export function layoutSettlement(game, { ghosts = 4 } = {}) {
     if (planned) spokes.push({ angle: b, from: 52, to: roadRadius(planned) + 6, solidTo: real ? roadRadius(real) + 6 : 52 });
   });
 
-  const outer = ringRadius(maxRing) + 175;
+  const perim = ringRadius(maxRing) + 60;
+  const riverR = ringRadius(maxRing) + 140;
+  const lmR = riverR + 150;
   const landmarks = LANDMARKS.map(l => {
     const known = l.feature ? game.unlocked(l.feature) : l.test(game);
-    return { ...l, known, ...polar(l.angle, Math.max(outer, 420)) };
+    return { ...l, known, ...polar(l.angle, lmR), from: polar(l.angle, perim), to: polar(l.angle, lmR - 52), bridge: { ...polar(l.angle, riverAt(l.angle, riverR)), rot: Math.round((Math.atan2(SQ * Math.sin(rad(l.angle)), Math.cos(rad(l.angle))) * 180) / Math.PI) } };
   });
-  const wall = game.unlocked('estate') ? { rx: ringRadius(maxRing) + 95, ry: (ringRadius(maxRing) + 95) * SQ } : null;
+  const wall = game.unlocked('estate') ? { rx: ringRadius(maxRing) + 100, ry: (ringRadius(maxRing) + 100) * SQ } : null;
 
-  const halfW = Math.max(470, ...all.map(p => Math.abs(p.x) + FOOT.w / 2 + 40), ...landmarks.map(l => Math.abs(l.x) + 90));
-  const halfH = Math.max(300, ...all.map(p => Math.abs(p.y) + FOOT.h / 2 + 30), ...landmarks.map(l => Math.abs(l.y) + 80));
-  return { nodes, plots, rings, spokes, landmarks, wall, view: { x: -halfW, y: -halfH, w: halfW * 2, h: halfH * 2 } };
+  const halfW = Math.max(470, ...all.map(p => Math.abs(p.x) + FOOT.w / 2 + 40), ...landmarks.map(l => Math.abs(l.x) + 90), riverR + 90);
+  const halfH = Math.max(300, ...all.map(p => Math.abs(p.y) + FOOT.h / 2 + 30), ...landmarks.map(l => Math.abs(l.y) + 80), (riverR + 60) * SQ);
+  return { nodes, plots, rings, spokes, landmarks, wall, perim, riverR, view: { x: -halfW, y: -halfH, w: halfW * 2, h: halfH * 2 } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -142,7 +145,7 @@ const R = (x, y, w, h, c = 'f') => `<rect x="${x}" y="${y}" width="${w}" height=
 const P = (d, c = 'f') => `<path d="${d}" class="${c}"/>`;
 const C = (x, y, r, c = 'f') => `<circle cx="${x}" cy="${y}" r="${r}" class="${c}"/>`;
 const E = (x, y, rx, ry, c = 'f', extra = '') => `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" class="${c}" ${extra}/>`;
-const roof = (x1, x2, y, top) => P(`M${x1} ${y} L${(x1 + x2) / 2} ${top} L${x2} ${y}Z`);
+const roof = (x1, x2, y, top) => P(`M${x1} ${y} L${(x1 + x2) / 2} ${top} L${x2} ${y}Z`, 'rf');
 const gear = (x, y, r) => C(x, y, r, 'l') + `<circle cx="${x}" cy="${y}" r="${r + 3}" class="l teeth"/>` + C(x, y, 2.5, 'a');
 const waves = (y, x0 = -30) => P(`M${x0} ${y} q5 -4 10 0 t10 0 t10 0 t10 0 t10 0 t10 0`, 'l');
 const flame = (x, y, s = 1) => P(`M${x} ${y} c${-6 * s} ${-4 * s} ${-4 * s} ${-12 * s} 0 ${-20 * s} c${2 * s} ${8 * s} ${8 * s} ${10 * s} ${4 * s} ${16 * s} c${-1 * s} ${4 * s} ${-3 * s} ${4 * s} ${-4 * s} ${4 * s}Z`, 'a');
@@ -214,17 +217,80 @@ const esc = value => String(value ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;
 const short = (name, n = 14) => (name.length > n ? `${name.slice(0, n - 1)}…` : name);
 const ell = (cx, cy, rx, ry) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"`;
 
+// --- terrain ------------------------------------------------------------------------------------
+const hash = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const segDist = (px, py, x1, y1, x2, y2) => { const dx = x2 - x1, dy = y2 - y1; const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy || 1))); return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy)); };
+const ellDist = (x, y, r) => Math.abs(Math.hypot(x, y / SQ) - r);
+const TREES = {
+  pine: (x, y, s) => `<g transform="translate(${x} ${y}) scale(${s})"><rect x="-1.5" y="-1" width="3" height="6" class="trunk"/><path d="M0 -26 L-8 -12 H8Z M0 -18 L-10 -4 H10Z M0 -10 L-12 4 H12Z" class="pine"/></g>`,
+  oak: (x, y, s) => `<g transform="translate(${x} ${y}) scale(${s})"><rect x="-2" y="-4" width="4" height="9" class="trunk"/><circle cx="0" cy="-12" r="10" class="oak"/><circle cx="-6" cy="-8" r="6" class="oak2"/><circle cx="6" cy="-9" r="6" class="oak2"/></g>`,
+  bush: (x, y, s) => `<g transform="translate(${x} ${y}) scale(${s})"><circle cx="-4" cy="-3" r="5" class="oak2"/><circle cx="4" cy="-3" r="5" class="oak2"/><circle cx="0" cy="-6" r="5" class="oak"/></g>`,
+  rock: (x, y, s) => `<path transform="translate(${x} ${y}) scale(${s})" d="M-7 2 L-4 -5 L3 -6 L8 2Z" class="rock"/>`,
+  tuft: (x, y) => `<path d="M${x - 4} ${y} l1.5 -6 l1.5 6 m1 0 l2 -8 l1.5 8 m1 0 l2 -5 l1 5" class="tuft"/>`,
+  flower: (x, y, c) => `<circle cx="${x}" cy="${y}" r="1.8" class="flower f${c}"/>`
+};
+let terrainCache = { key: '', html: '' };
+function terrainMarkup(layout) {
+  const { view, nodes, plots, rings, spokes, landmarks, perim, riverR } = layout;
+  const key = JSON.stringify([view, [...nodes, ...plots].map(p => [p.x, p.y]), rings.length, spokes.length, landmarks.map(l => l.known), perim]);
+  if (terrainCache.key === key) return terrainCache.html;
+  const spots = [...nodes, ...plots];
+  const out = [];
+  const step = 44;
+  for (let gx = Math.floor(view.x / step); gx * step < view.x + view.w; gx++) {
+    for (let gy = Math.floor(view.y / step); gy * step < view.y + view.h; gy++) {
+      const r1 = hash(gx, gy), r2 = hash(gy + 77, gx - 31), r3 = hash(gx * 3 + 5, gy * 7 + 9);
+      const x = Math.round(gx * step + r1 * step), y = Math.round(gy * step + r2 * step);
+      if (x < view.x + 20 || x > view.x + view.w - 20 || y < view.y + 20 || y > view.y + view.h - 20) continue;
+      const polarR = Math.hypot(x, y / SQ), ang = ((Math.atan2(y / SQ, x) * 180) / Math.PI + 360) % 360;
+      const rv = riverAt(ang, riverR);
+      if (Math.abs(polarR - rv) < 38) continue;                                  // river
+      if (spots.some(p => Math.abs(x - p.x) < 58 && y > p.y - 62 && y < p.y + 58)) continue; // plots
+      if (rings.some(r => ellDist(x, y, r.r) < 22) || ellDist(x, y, perim) < 22) continue;     // ring roads
+      if (spokes.some(sp => { const a = polar(sp.angle, sp.from), b = polar(sp.angle, sp.to); return segDist(x, y, a.x, a.y, b.x, b.y) < 20; })) continue;
+      if (landmarks.some(l => Math.hypot(x - l.x, y - l.y) < 95 || (l.known && segDist(x, y, l.from.x, l.from.y, l.to.x, l.to.y) < 22))) continue;
+      if (polarR < 70) continue;
+      const beyond = polarR > rv;                                                  // wild country outside the river
+      const dense = beyond ? 0.78 : polarR > perim - 20 ? 0.42 : 0.14;
+      if (r3 < dense) {
+        const kind = beyond ? (r1 < 0.55 ? 'pine' : r1 < 0.85 ? 'oak' : 'bush') : (r2 < 0.4 ? 'oak' : r2 < 0.75 ? 'bush' : 'pine');
+        out.push([y, TREES[kind](x, y, 0.8 + r2 * 0.55)]);
+      } else if (r3 < dense + 0.04) out.push([y, TREES.rock(x, y, 0.9 + r1 * 0.5)]);
+      else if (r3 < dense + 0.5) out.push([y - 100000, TREES.tuft(x, y)]);
+      else if (r3 < dense + 0.56) out.push([y - 100000, TREES.flower(x, y, Math.floor(r1 * 3))]);
+    }
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  terrainCache = { key, html: out.map(o => o[1]).join('') };
+  return terrainCache.html;
+}
+
+function riverMarkup(layout) {
+  const pts = [];
+  for (let d = 0; d <= 360; d += 3) { const r = riverAt(d, layout.riverR); const p = polar(d, r); pts.push(`${pts.length ? 'L' : 'M'}${p.x} ${p.y}`); }
+  const d = pts.join(' ') + 'Z';
+  return `<path d="${d}" class="river-bank"/><path d="${d}" class="river"/><path d="${d}" class="river-deep"/><path d="${d}" class="river-spark"/>`;
+}
+
+function bridgeMarkup(l) {
+  const planks = Array.from({ length: 11 }, (_, i) => `<path d="M${-30 + i * 6} -11 V11" class="plank"/>`).join('');
+  return `<g transform="translate(${l.bridge.x} ${l.bridge.y}) rotate(${l.bridge.rot})"><rect x="-34" y="-12" width="68" height="24" class="bridge"/>${planks}<path d="M-34 -12 H34 M-34 12 H34" class="rail"/><rect x="-36" y="-14" width="5" height="5" class="post"/><rect x="31" y="-14" width="5" height="5" class="post"/><rect x="-36" y="9" width="5" height="5" class="post"/><rect x="31" y="9" width="5" height="5" class="post"/></g>`;
+}
+
 function roadMarkup(layout) {
   const out = [];
+  const road = d => `<path d="${d}" class="road-bed"/><path d="${d}" class="road-line"/>`;
   layout.spokes.forEach(s => {
     const a = polar(s.angle, s.from), b = polar(s.angle, s.to), c = polar(s.angle, Math.max(s.from, s.solidTo));
     out.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" class="road-planned"/>`);
-    out.push(`<line x1="${a.x}" y1="${a.y}" x2="${c.x}" y2="${c.y}" class="road-bed"/><line x1="${a.x}" y1="${a.y}" x2="${c.x}" y2="${c.y}" class="road-line"/>`);
+    out.push(road(`M${a.x} ${a.y} L${c.x} ${c.y}`));
   });
   layout.rings.forEach(r => {
     if (r.planned) out.push(`${ell(0, 0, r.r, r.r * SQ)} class="road-planned"/>`);
     else out.push(`${ell(0, 0, r.r, r.r * SQ)} class="road-bed"/>${ell(0, 0, r.r, r.r * SQ)} class="road-line"/>`);
   });
+  out.push(`${ell(0, 0, layout.perim, layout.perim * SQ)} class="road-bed"/>${ell(0, 0, layout.perim, layout.perim * SQ)} class="road-line"/>`);
+  layout.landmarks.filter(l => l.known).forEach(l => out.push(road(`M${l.from.x} ${l.from.y} L${l.to.x} ${l.to.y}`)));
   return out.join('');
 }
 
@@ -245,7 +311,7 @@ export function renderSettlementSvg(layout, { selected = null, night = false, da
     if (n.ghost) {
       return `<g class="map-node ghost ${n.affordable ? 'ready' : ''} ${isSel ? 'selected' : ''}" transform="translate(${n.x} ${n.y})" data-mapnode="${esc(n.key)}" tabindex="0"><title>${esc(n.name)}: not built${n.affordable ? ' (you can afford it)' : ''}</title>${hit}${pad}
         <g class="glyph" transform="scale(${scale})">${glyph}</g>
-        <text y="34" class="map-name">${esc(short(n.name))}</text><text y="47" class="map-sub">${n.affordable ? '+ build here' : 'blueprint'}</text></g>`;
+        <text y="34" class="map-name">${esc(short(n.name))}</text><text y="47" class="map-sub">${n.affordable ? '+ build here' : 'empty plot'}</text></g>`;
     }
     const pips = Array.from({ length: 10 }, (_, i) => `<rect x="${-26 + i * 5.4}" y="51" width="4" height="2.4" class="${i < n.level ? 'on' : ''}" style="--c:${color}"/>`).join('');
     return `<g class="map-node ${n.id === 'campfire' ? 'hearth' : ''} ${isSel ? 'selected' : ''}" transform="translate(${n.x} ${n.y})" data-mapnode="${esc(n.key)}" tabindex="0"><title>${esc(n.name)}, level ${n.level}</title>${hit}${pad}
@@ -257,17 +323,15 @@ export function renderSettlementSvg(layout, { selected = null, night = false, da
   const left = view.x + 24, top = view.y + 30;
   const bw = 214, bh = 54, bx = view.x + view.w - bw - 18, by = view.y + view.h - bh - 16;
   const furniture = `
-    <g class="compass" transform="translate(${left + 26} ${top + 30})"><circle r="22" class="l"/><path d="M0 -26 L6 0 L0 -5 L-6 0Z" class="a"/><path d="M0 26 L6 0 L0 5 L-6 0Z" class="f"/><text y="-32" class="map-sub">N</text></g>
-    <g class="titleblock"><rect x="${bx}" y="${by}" width="${bw}" height="${bh}" class="tb"/><text x="${bx + 12}" y="${by + 22}" class="tb-title">EMBERFALL · PLAN</text><text x="${bx + 12}" y="${by + 41}" class="map-sub left">Sheet ${day} · ${nodes.length} structures</text></g>
-    <g transform="translate(${left} ${view.y + view.h - 26})"><path d="M0 0 H100 M0 -5 V5 M50 -3 V3 M100 -5 V5" class="l"/><text x="0" y="-9" class="map-sub left">10 paces</text></g>`;
+    <g class="compass" transform="translate(${left + 26} ${top + 30})"><circle r="22" class="cring"/><path d="M0 -26 L6 0 L0 -5 L-6 0Z" class="cn"/><path d="M0 26 L6 0 L0 5 L-6 0Z" class="cs"/><text y="-32" class="map-sub">N</text></g>
+    <g class="titleblock"><rect x="${bx}" y="${by}" width="${bw}" height="${bh}" class="tb"/><text x="${bx + 12}" y="${by + 22}" class="tb-title">EMBERFALL</text><text x="${bx + 12}" y="${by + 41}" class="map-sub left">Day ${day} · ${nodes.length} buildings</text></g>`;
   const width = zoom ? `${Math.round(view.w * zoom)}px` : `max(100%, ${Math.round(view.w * 0.62)}px)`;
-  return `<svg class="settlement-svg ${night ? 'is-night' : ''}" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" style="width:${width}" role="img" aria-label="Blueprint of the settlement">
-    <defs><pattern id="gridMinor" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" class="grid-minor"/></pattern>
-      <pattern id="gridMajor" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#gridMinor)"/><path d="M100 0H0V100" class="grid-major"/></pattern>
-      <radialGradient id="fog" cx="50%" cy="50%" r="72%"><stop offset="55%" stop-color="#050b12" stop-opacity="0"/><stop offset="100%" stop-color="#050b12" stop-opacity=".85"/></radialGradient></defs>
-    <rect x="${view.x}" y="${view.y}" width="${view.w}" height="${view.h}" class="bp-bg"/>
-    <rect x="${view.x}" y="${view.y}" width="${view.w}" height="${view.h}" fill="url(#gridMajor)"/>
-    ${wallMarkup}<g>${roadMarkup(layout)}</g><g>${landmarks.map(landmarkMarkup).join('')}</g>
+  return `<svg class="settlement-svg ${night ? 'is-night' : ''}" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" style="width:${width}" role="img" aria-label="Map of the settlement">
+    <defs><radialGradient id="meadow" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="#2b4a27"/><stop offset="100%" stop-color="#18301d"/></radialGradient>
+      <radialGradient id="fog" cx="50%" cy="50%" r="74%"><stop offset="58%" stop-color="#060d08" stop-opacity="0"/><stop offset="100%" stop-color="#060d08" stop-opacity=".8"/></radialGradient></defs>
+    <rect x="${view.x}" y="${view.y}" width="${view.w}" height="${view.h}" fill="url(#meadow)"/>
+    ${riverMarkup(layout)}${wallMarkup}<g>${roadMarkup(layout)}</g>${landmarks.filter(l => l.known).map(bridgeMarkup).join('')}
+    <g class="terrain">${terrainMarkup(layout)}</g><g>${landmarks.map(landmarkMarkup).join('')}</g>
     <g>${[...plots, ...nodes].sort((a, b) => a.y - b.y).map(plot).join('')}</g>
     ${furniture}
     <rect x="${view.x}" y="${view.y}" width="${view.w}" height="${view.h}" fill="url(#fog)" pointer-events="none"/>
